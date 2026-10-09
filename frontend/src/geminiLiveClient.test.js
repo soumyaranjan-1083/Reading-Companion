@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
-import { SessionMicGate } from "./sessionMicGate.js";
+import { SessionMicGate, createOpeningMicFallback } from "./sessionMicGate.js";
 
 test("page context precedes buffered question and audio end on first ready", async () => {
   const events = [];
@@ -135,4 +135,40 @@ test("pre-roll is sent after the manual activity start and before live speech", 
   await client.audioSendChain;
   assert.deepEqual(events, ["start", "pre-roll", "question", "end"]);
   await client.close();
+});
+
+test("opening mic fallback retries until the session becomes ready", () => {
+  const gate = new SessionMicGate(() => {}, () => {});
+  let ready = false;
+  let attempts = 0;
+  let started = false;
+  const fallback = createOpeningMicFallback({
+    gate,
+    isReady: () => ready,
+    onStarted: () => { started = true; },
+    delayMs: 50,
+    schedule: (fn) => {
+      attempts += 1;
+      setTimeout(() => {
+        if (attempts === 1) {
+          ready = false;
+          fn();
+          return;
+        }
+        ready = true;
+        fn();
+      }, 0);
+      return attempts;
+    },
+    cancelTimer: () => {},
+  });
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      assert.equal(started, true);
+      assert.equal(gate.active, true);
+      fallback.cancel();
+      resolve();
+    }, 20);
+  });
 });
