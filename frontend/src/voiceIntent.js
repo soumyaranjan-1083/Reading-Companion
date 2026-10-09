@@ -7,7 +7,7 @@ const QUIET_PATTERNS = [
   /\b(?:let me|i will|i'll) read\b/,
   /\b(?:don't|do not) interrupt\b/,
   /\b(?:be|stay) quiet\b/,
-  /\b(?:main|mein|mai) padh(?:ne|ta|ti| raha| rahi|unga|ungi)?\b/,
+  /\b(?:main|mein|mai) (?:ab )?(?:padhne(?: ja (?:raha|rahi|rahe) hoon)?|padhna|padhta|padhti|padh(?: raha| rahi|unga|ungi))\b/,
   /\b(?:abhi|thoda) (?:padhne|padhna|padhta|padhti)\b/,
   /\bchup raho\b/,
   /\b(?:mujhe|ab) padhne do\b/,

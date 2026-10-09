@@ -1,6 +1,18 @@
 # Reading Companion
 
-A personal reading companion app built with React + Vite on the frontend and a small Node/Express backend for AI session orchestration. Version 2.3.0 builds on **The Storykeeper’s Lantern**, keeping reader data local-first with optional private per-account cloud snapshots.
+A personal reading companion app built with React + Vite on the frontend and a small Node/Express backend for AI session orchestration. Version 2.4.0 adds **Reader Arena & Honest Eyes**, keeping reader data local-first with optional private per-account cloud snapshots.
+
+## Version 2.4.0: Reader Arena & Honest Eyes
+
+- Reader Arena ranks actual reading time across genres, with weekly and all-time tabs, a Monday-midnight IST weekly reset, and a live Profile rank card.
+- Weekly totals begin when the weekly ranking migration is applied; earlier weekly time cannot be recovered from the daily allowance records.
+- Before using a new page photo, the app checks whether it shows book text. Unrelated and unreadable photos are blocked; if the check is unavailable, the photo remains unverified and is not sent to the reading model.
+- Empty placeholder chapters are explicitly marked as unknown, and the companion is instructed to answer only from the reader’s words, saved context, or verified page transcription.
+- The profile and Arena are designed for both themes, touch and keyboard navigation, and reduced-motion preferences.
+
+Apply [the account reading-limit migration](supabase/migrations/20261014120000_add_account_reading_limits.sql), [the all-time ranking migration](supabase/migrations/20261015120000_add_reader_rankings.sql), and [the weekly Arena migration](supabase/migrations/20261016120000_add_reader_arena_weekly_rankings.sql) before deploying. `READING_VERIFY_MODEL` is optional and defaults to `READING_TEXT_MODEL`.
+
+See [the page-grounding red-team checklist](docs/grounding-redteam.md) for the manual photo and hallucination checks.
 
 ## Version 2.3.0: The Storykeeper’s Lantern
 
@@ -36,7 +48,7 @@ The microphone remains captured locally and PCM audio is sent to the Live sessio
 
 Book deletion is a soft delete: the book record stores its archived related gems and conversation recap, while active Library and Mind Map views stop exposing them. Restore rehydrates those records; permanent deletion removes the archived book record and its embedded relationships. Reading limits and active usage are stored per Supabase user in `reading_companion_session_limits`; server-side RPCs reset usage on the UTC date boundary and atomically cap recorded seconds. The frontend batches short usage increments and keeps unsubmitted seconds scoped to the signed-in account for recovery after a reload.
 
-Reader ranking compares all-time accepted active reading seconds across every genre. The authenticated leaderboard displays each reader's profile name and total time; tracking begins after the ranking migration is applied, so prior daily-only usage cannot be backfilled. Deleting the account snapshot also clears that reader's ranking total.
+Reader ranking compares accepted active reading seconds across every genre. The authenticated leaderboard displays each reader's profile name and reading time; weekly aggregation begins when the weekly Arena migration is applied, so earlier weekly time cannot be backfilled. Deleting the account snapshot also clears that reader's ranking totals.
 
 Apply [the account reading-limit migration](supabase/migrations/20261014120000_add_account_reading_limits.sql) and [the reader-ranking migration](supabase/migrations/20261015120000_add_reader_rankings.sql) before deploying this version. Configure the backend-only `SESSION_LIMIT_ADMIN_USER_IDS` as a comma-separated list of Supabase auth user UUIDs allowed to change another reader’s daily minutes from Settings. Never expose the Supabase service-role key to the frontend. Readers may view their limit, but only allowlisted administrators can change it.
 

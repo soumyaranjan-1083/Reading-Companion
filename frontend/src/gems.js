@@ -75,6 +75,14 @@ function normalizeGem(raw) {
   };
 }
 
+function createGemId(gems) {
+  let id = "";
+  do {
+    id = `gem-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  } while (gems.some((gem) => String(gem.id) === id));
+  return id;
+}
+
 export class Gems {
   constructor() {
     this.gems = load().map(normalizeGem);
@@ -98,7 +106,7 @@ export class Gems {
     const resolvedAuthor = attributedTo || authorName || "";
     const resolvedChapterNumber = chapterNumber ?? chapter ?? null;
     const saved = normalizeGem({
-      id: `gem-${Date.now()}`,
+      id: createGemId(this.gems),
       quote: cleanQuote,
       takeawaySituation,
       takeawaySteps,

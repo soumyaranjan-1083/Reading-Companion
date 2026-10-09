@@ -20,6 +20,11 @@ export function normalizeReaderName(value) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, 30) || "Reader";
 }
 
+export function normalizeRankingPeriod(value) {
+  if (value === undefined || value === "") return "all_time";
+  return value === "weekly" || value === "all_time" ? value : null;
+}
+
 export function readerRankingResponse(rows, currentUserId) {
   if (!Array.isArray(rows)) throw new Error("invalid_reader_rankings");
   return rows.map((row) => {

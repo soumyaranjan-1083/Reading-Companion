@@ -19,6 +19,7 @@ import { apiFetch, apiFetchFast } from "./api.js";
 import { useBackLayer } from "./backStack.js";
 import MajorReleaseCard from "./MajorRelease.jsx";
 import CatalogCard from "./CatalogCard.jsx";
+import ReaderArenaReleaseCard from "./ReaderArenaReleaseCard.jsx";
 import { INTERACTION_SPRING } from "./motionConfig.js";
 import { useGeminiVoiceDriver } from "./onboarding/avatarDriver.js";
 import { applyPushPrefs, collectSessionStarts, currentPushEndpoint, computeStudyPattern, formatClockMinute, loadPushPrefs, notificationPermission, pushErrorMessage } from "./pushNotifications.js";
@@ -84,7 +85,7 @@ function ReleaseNotesScreen({ releases, onBack, highlightVersion = null }) {
                 transition={{ delay: Math.min(releaseIndex * 0.07, 0.35), duration: 0.28, ease: "easeOut" }}
               >
                 <span className="st-release-node" aria-hidden="true" />
-                {release.catalog ? <CatalogCard release={release} /> : release.major || release.ui || release.pulse ? <MajorReleaseCard release={release} variant={release.pulse ? "pulse" : release.ui ? "ui" : "major"} /> : (
+                {release.arena ? <ReaderArenaReleaseCard release={release} /> : release.catalog ? <CatalogCard release={release} /> : release.major || release.ui || release.pulse ? <MajorReleaseCard release={release} variant={release.pulse ? "pulse" : release.ui ? "ui" : "major"} /> : (
                 <div className="st-release elevated">
                   <div className="st-release-head">
                     <div>
