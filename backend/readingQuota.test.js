@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   isUserId,
   normalizeDailyLimitMinutes,
+  normalizeReaderName,
   normalizeUsageSeconds,
   parseAdminUserIds,
   quotaResponse,
+  readerRankingResponse,
 } from "./readingQuota.js";
 
 test("admin ids are trimmed and case-insensitive", () => {
@@ -24,6 +26,24 @@ test("quota inputs are bounded whole minutes and batched seconds", () => {
   assert.equal(normalizeDailyLimitMinutes(1441), null);
   assert.equal(normalizeUsageSeconds(10), 10);
   assert.equal(normalizeUsageSeconds(61), null);
+});
+
+test("reader names are trimmed, collapsed, and bounded", () => {
+  assert.equal(normalizeReaderName("  Asha   Reader  "), "Asha Reader");
+  assert.equal(normalizeReaderName(" "), "Reader");
+  assert.equal(normalizeReaderName("R".repeat(40)).length, 30);
+});
+
+test("ranking response validates rows and marks the signed-in reader", () => {
+  assert.deepEqual(readerRankingResponse([
+    { rank_position: "1", reader_name: "Asha", total_reading_seconds: "3661", user_id: "ABC" },
+    { rank_position: 2, reader_name: "", total_reading_seconds: 60, user_id: "other" },
+  ], "abc"), [
+    { rank: 1, name: "Asha", totalSeconds: 3661, isYou: true },
+    { rank: 2, name: "Reader", totalSeconds: 60, isYou: false },
+  ]);
+  assert.throws(() => readerRankingResponse([{ rank_position: 0, total_reading_seconds: -1 }], "abc"), /invalid_reader_rankings/);
+  assert.throws(() => readerRankingResponse(null, "abc"), /invalid_reader_rankings/);
 });
 
 test("quota response clamps remaining time and exposes admin capability", () => {
