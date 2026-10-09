@@ -96,7 +96,7 @@ import BookSearchFlow from "./components/BookSearchFlow.jsx";
 import MascotCharacter from "./components/MascotCharacter.jsx";
 import { describeLiveStatus, friendlyErrorMessage } from "./friendlyErrors.js";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
-import { SessionMicGate } from "./sessionMicGate.js";
+import { createOpeningMicFallback, SessionMicGate } from "./sessionMicGate.js";
 import { buildPageStatusNote, createPageContextProvider, loadPage, pageCanBeSentToLive, savePage } from "./sessionPage.js";
 import { pageVerificationDecision, parsePageVerificationResponse, rejectedPageMessage } from "./pageVerification.js";
 import { buildPlaceholderChapterKnowledgeBlock, groundPlaceholderBookContext, isPlaceholderChapter } from "./readingGrounding.js";
@@ -2955,6 +2955,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const pageProviderRef = useRef(createPageContextProvider());
   const connectionPromiseRef = useRef(null);
   const micGateRef = useRef(null);
+  const openingMicFallbackRef = useRef(null);
   const vadRef = useRef(null);
   const vadStartingRef = useRef(false);
   const readingModeRef = useRef(false);
@@ -2976,6 +2977,21 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const activitiesRef = useRef([]);
   const activityTimerRef = useRef(null);
   const sessionMascot = useMascotPreference();
+  function clearOpeningMicFallback() {
+    openingMicFallbackRef.current?.cancel();
+    openingMicFallbackRef.current = null;
+  }
+  function startOpeningMicFallbackNow() {
+    const fallback = openingMicFallbackRef.current;
+    if (!fallback) return false;
+    if (!fallback.start()) {
+      openingMicFallbackRef.current = null;
+      return false;
+    }
+    fallback.cancel();
+    openingMicFallbackRef.current = null;
+    return true;
+  }
   useEffect(() => {
     if (LEGACY_STREAMING || !window.visualViewport) return undefined;
     const viewport = window.visualViewport;
@@ -4229,13 +4245,17 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           });
         },
         onAudio: (data) => {
+          if (!LEGACY_STREAMING) clearOpeningMicFallback();
           if (!LEGACY_STREAMING && questionEndAtRef.current && !firstAudioLoggedRef.current) {
             firstAudioLoggedRef.current = true;
             console.info("[READING_LATENCY] first audio after question", Math.round(performance.now() - questionEndAtRef.current), "ms");
           }
           audioPlaybackRef.current?.enqueue(data);
         },
-        onText: (text) => { companionTurnBufRef.current += text; },
+        onText: (text) => {
+          if (!LEGACY_STREAMING) clearOpeningMicFallback();
+          companionTurnBufRef.current += text;
+        },
         onUserText: (text) => {
           userTurnBufRef.current += text;
           const intent = classifyVoiceIntent(text, profileStore.data.companionName || "");
@@ -4272,13 +4292,23 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
             clientRef.current?.sendText(opening);
             return;
           }
-          const pageAvailable = Boolean(pageRef.current);
+          const pageAvailable = pageCanBeSentToLive(pageRef.current);
           const instructions = pageAvailable
             ? "A page photo is available. If its printed number is clearly visible, read it accurately; otherwise ask for the number only if needed. Do not pretend to see anything not in the photo."
-            : "No page photo is available. In your short opening, warmly invite the reader to share a page photo. Do not claim to know what page or passage they are reading.";
-          clientRef.current?.sendText(`${opening} ${instructions} Give this opening now, then listen.`);
+            : pageRef.current
+              ? "The last photo is unverified and was not shared with you. In your short opening, warmly ask the reader to share a clear page photo. Do not claim to see or know its contents."
+              : "No page photo is available. In your short opening, warmly invite the reader to share a page photo. Do not claim to know what page or passage they are reading.";
+          const client = clientRef.current;
+          void client?.sendText(`${opening} ${instructions} Give this opening now, then listen.`);
+          clearOpeningMicFallback();
+          openingMicFallbackRef.current = createOpeningMicFallback({
+            gate: micGateRef.current,
+            isReady: () => Boolean(clientRef.current?.ready && !endingRef.current),
+            onStarted: () => setStatus("Listening for your question"),
+          });
         },
         onTurnComplete: () => {
+        clearOpeningMicFallback();
           questionInFlightRef.current = false;
         if (!LEGACY_STREAMING && !micGateRef.current?.active) micGateRef.current?.start();
         const companionText = companionTurnBufRef.current.trim();
@@ -4320,6 +4350,9 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
       },
       (level) => {
         micLevelRef.current = Math.min(1, Number(level) || 0);
+        if (!LEGACY_STREAMING && micLevelRef.current > 0.22 && !audioCaptureRef.current?.muted) {
+          startOpeningMicFallbackNow();
+        }
         if (micLevelRef.current > 0.22 && !audioCaptureRef.current?.muted && (LEGACY_STREAMING || micGateRef.current?.active)) clientRef.current?.noteSpeech();
       },
       () => {
@@ -4354,6 +4387,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
 
   async function handleEnd({ restart = false } = {}) {
     clearTimeout(warmTimerRef.current);
+    clearOpeningMicFallback();
     micGateRef.current?.reset();
     if (vadRef.current) {
       await vadRef.current.destroy().catch((error) => console.warn("[VAD] cleanup failed", error));
