@@ -25,8 +25,12 @@ export function fetchReadingQuota() {
   return quotaRequest("/api/reading/session-limit");
 }
 
-export function recordReadingUsage(seconds) {
-  return quotaRequest("/api/reading/session-usage", "POST", { seconds });
+export function fetchReaderRankings() {
+  return quotaRequest("/api/reading/rankings");
+}
+
+export function recordReadingUsage(seconds, readerName) {
+  return quotaRequest("/api/reading/session-usage", "POST", { seconds, readerName });
 }
 
 export function setReadingLimit(userId, dailyLimitMinutes) {

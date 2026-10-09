@@ -16,6 +16,27 @@ export function normalizeUsageSeconds(value) {
   return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : null;
 }
 
+export function normalizeReaderName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 30) || "Reader";
+}
+
+export function readerRankingResponse(rows, currentUserId) {
+  if (!Array.isArray(rows)) throw new Error("invalid_reader_rankings");
+  return rows.map((row) => {
+    const rank = Number(row?.rank_position);
+    const totalSeconds = Number(row?.total_reading_seconds);
+    if (!Number.isInteger(rank) || rank < 1 || !Number.isSafeInteger(totalSeconds) || totalSeconds < 0) {
+      throw new Error("invalid_reader_rankings");
+    }
+    return {
+      rank,
+      name: normalizeReaderName(row.reader_name),
+      totalSeconds,
+      isYou: String(row.user_id || "").toLowerCase() === String(currentUserId || "").toLowerCase(),
+    };
+  });
+}
+
 export function quotaResponse(row, canManage = false) {
   const dailyLimitMinutes = Number(row?.daily_limit_minutes);
   const usedSeconds = Number(row?.used_seconds);
