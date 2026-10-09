@@ -10,7 +10,7 @@ import { getAiProviderOrder, readTextCompletion, requestTextCompletion, streamTe
 import { normalizeGemEchoCatalog, validateGemEchoCandidates, validateGemEchoPairs } from "./gemEchoes.js";
 import { classifyGeminiFailure, KeyPool } from "./geminiKeyPool.js";
 import { verifyDocsOwner, loadDocsBundle } from "./docsAccess.js";
-import { isUserId, normalizeDailyLimitMinutes, normalizeUsageSeconds, parseAdminUserIds, quotaResponse } from "./readingQuota.js";
+import { isUserId, normalizeDailyLimitMinutes, normalizeReaderName, normalizeUsageSeconds, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
 import { registerDocsNarration } from "./docsNarration.js";
 import { buildChunks, retrieve, buildMessages, pickCited } from "./docsHelper.js";
 import { buildPushPayload, createPushService, normalizeReminderMinute, normalizeSubscription } from "./pushNotifications.js";
@@ -1270,7 +1270,7 @@ async function readSupabaseUserId(req) {
   }
 }
 
-async function callReadingQuotaRpc(name, payload) {
+async function callReadingQuotaRpc(name, payload, allowEmpty = false) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error("reading_limit_unavailable");
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: "POST",
@@ -1283,8 +1283,8 @@ async function callReadingQuotaRpc(name, payload) {
   });
   if (!response.ok) throw new Error(`reading_limit_storage_${response.status}`);
   const rows = await response.json();
-  if (!Array.isArray(rows) || !rows[0]) throw new Error("reading_limit_storage_empty");
-  return rows[0];
+  if (!Array.isArray(rows) || (!allowEmpty && !rows[0])) throw new Error("reading_limit_storage_empty");
+  return allowEmpty ? rows : rows[0];
 }
 
 async function getAuthenticatedQuotaUser(req, res) {
@@ -1296,6 +1296,19 @@ async function getAuthenticatedQuotaUser(req, res) {
   return userId;
 }
   const readingLimitAdmins = parseAdminUserIds(process.env.SESSION_LIMIT_ADMIN_USER_IDS);
+  app.get("/api/reading/rankings", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const userId = await getAuthenticatedQuotaUser(req, res);
+    if (!userId) return;
+    try {
+      const rows = await callReadingQuotaRpc("get_reading_companion_reader_rankings", {}, true);
+      return res.json({ rankings: readerRankingResponse(rows, userId) });
+    } catch (error) {
+      console.error("[READING_RANKINGS] fetch failed:", redactSecrets(error?.message || error, 160));
+      return res.status(503).json({ error: "reader_rankings_unavailable" });
+    }
+  });
+
   app.get("/api/reading/session-limit", async (req, res) => {
     res.set("Cache-Control", "no-store");
     const userId = await getAuthenticatedQuotaUser(req, res);
@@ -1316,7 +1329,11 @@ async function getAuthenticatedQuotaUser(req, res) {
     const seconds = normalizeUsageSeconds(req.body?.seconds);
     if (!seconds) return res.status(400).json({ error: "invalid_usage_seconds" });
     try {
-      const row = await callReadingQuotaRpc("record_reading_companion_session_usage", { p_user_id: userId, p_seconds: seconds });
+      const row = await callReadingQuotaRpc("record_reading_companion_session_usage", {
+        p_user_id: userId,
+        p_seconds: seconds,
+        p_reader_name: normalizeReaderName(req.body?.readerName),
+      });
       const quota = quotaResponse(row, readingLimitAdmins.has(userId.toLowerCase()));
       return res.json({ ...quota, limitReached: quota.remainingSeconds <= 0 });
     } catch (error) {
