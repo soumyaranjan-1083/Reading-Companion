@@ -116,6 +116,9 @@ export const HELP_ANIMATIONS = [
   { id: "session-snapshot-flow", group: "Reading session", title: "Snapshot reading", kind: "flow", accent: "#6aa9ff",
     keywords: ["snapshot", "page snapshot", "next page", "page turn", "replace snapshot", "previous page context", "book snapshot"],
     items: [item("Camera", "Send a snapshot", "Share one still photo of the page you are reading."), item("BookOpen", "Ask about it", "The companion answers using the latest page photo."), item("ChevronRight", "Turn the page", "Send another snapshot when you move to a new page."), item("Brain", "Keep the story", "Saved summaries and story context carry across page photos.")] },
+  { id: "profile-reader-arena", group: "Profile", title: "Reader Arena", kind: "ring", accent: "#f5c451",
+    keywords: ["reader arena", "arena", "reader ranking", "reading leaderboard", "weekly reading rank", "all time ranking", "reading race"],
+    items: [item("TrendingUp", "Your place", "See your real reading-time rank among readers."), item("Clock", "This week", "The weekly race resets Monday at midnight in India."), item("Sparkles", "All time", "Compare lifetime reading time across every genre.")] },
 
   // Support and info
   { id: "support-report", group: "Support", title: "Report an Issue", kind: "flow", accent: "#f2a65a",

@@ -25,8 +25,8 @@ export function fetchReadingQuota() {
   return quotaRequest("/api/reading/session-limit");
 }
 
-export function fetchReaderRankings() {
-  return quotaRequest("/api/reading/rankings");
+export function fetchReaderRankings(period = "all_time") {
+  return quotaRequest(`/api/reading/rankings?period=${encodeURIComponent(period)}`);
 }
 
 export function recordReadingUsage(seconds, readerName) {

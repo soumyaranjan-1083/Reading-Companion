@@ -13,9 +13,6 @@ function getRecentOpeners() { try { return JSON.parse(localStorage.getItem(OPENE
 function saveOpener(text) {
   try { localStorage.setItem(OPENER_KEY, JSON.stringify([...getRecentOpeners(), text.slice(0, 160)].slice(-8))); } catch { /* ignore */ }
 }
-const SNAPSHOT_FIRST_NOTE = "[SYSTEM NOTE] SNAPSHOT MODE. The reader just shared a still photo of the book page they are on; the image you now see is that fixed photo, NOT a live camera, so it will not move. Treat it as the current page (rule 23b). Say ONE very short Hinglish line (under 8 words) confirming you can see the page, or say plainly that it is unclear and ask for a clearer photo. Then stay quiet until the reader asks about a word, phrase or sentence.";
-const SNAPSHOT_NEXT_NOTE = "[SYSTEM NOTE] NEW SNAPSHOT. The reader shared a newer page photo. Forget only the previous image and use this latest photo for what is visible now; retain established story facts, saved summaries and earlier page references. Do not assume the reader finished the previous page. Say ONE very short Hinglish line (under 8 words) confirming the new photo is visible, or say it is unclear and ask for a clearer photo. Then stay quiet until asked.";
-const SNAPSHOT_REMINDER_NOTE = "[SYSTEM NOTE] Reminder: SNAPSHOT MODE is still on. The image you see is the reader's current page photo, not a live camera. Do not say anything about this note.";
 const SNAPSHOT_OFF_NOTE = "[SYSTEM NOTE] The reader switched to the LIVE camera. Ignore the earlier page snapshot and use only the live camera pictures from now on. Do not say anything about this note.";
 function buildOpeningNote(cont) {
   const hour = new Date().getHours();
@@ -43,7 +40,6 @@ import {
     Camera as CameraIcon,
     CameraOff,
     Check,
-    ChevronLeft,
     ChevronRight,
     Clock,
     Cloud,
@@ -101,7 +97,9 @@ import MascotCharacter from "./components/MascotCharacter.jsx";
 import { describeLiveStatus, friendlyErrorMessage } from "./friendlyErrors.js";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
 import { SessionMicGate } from "./sessionMicGate.js";
-import { createPageContextProvider, loadPage, savePage } from "./sessionPage.js";
+import { buildPageStatusNote, createPageContextProvider, loadPage, pageCanBeSentToLive, savePage } from "./sessionPage.js";
+import { pageVerificationDecision, parsePageVerificationResponse, rejectedPageMessage } from "./pageVerification.js";
+import { buildPlaceholderChapterKnowledgeBlock, groundPlaceholderBookContext, isPlaceholderChapter } from "./readingGrounding.js";
 import { classifyUtterance, float32ToPcmChunks } from "./autoListen.js";
 import { classifyVoiceIntent } from "./voiceIntent.js";
 import { ensureGemInsights } from "./gemInsightClient.js";
@@ -148,7 +146,8 @@ import {
     UPDATE_MEMORY_DECLARATION,
 } from "./persona.js";
 import { Profile } from "./profile.js";
-import { fetchReaderRankings, fetchReadingQuota, recordReadingUsage, setReadingLimit } from "./readingQuota.js";
+import { fetchReadingQuota, recordReadingUsage, setReadingLimit } from "./readingQuota.js";
+import ReaderArenaEntry from "./ReaderArenaEntry.jsx";
 import { CONTACT } from "./developerContact.js";
 import "./ProfileUI.css";
 import "./ProfileCard.css";
@@ -161,6 +160,7 @@ import { AboutScreen, AccountScreen, ReportScreen, SettingsScreen } from "./Sett
 import { useDocsUnlocked } from "./docsUnlock.js";
 import DocsAccessCard from "./DocsAccessCard.jsx";
 const DocsScreen = lazy(() => import("./docs/DocsScreen.jsx"));
+const ReaderArena = lazy(() => import("./ReaderArena.jsx"));
 import { prepareSnapshot } from "./snapshotCapture.js";
 import { resolveStorySource } from "./story/resolveStorySource.js";
 import StoryTheatre from "./story/StoryTheatre.jsx";
@@ -806,7 +806,7 @@ function AppCore() {
             {/* {screen === "memory" && <MemoryScreen nav={nav} />} */}
             {screen === "memory" && <MemoryTab nav={nav} />}
             {screen === "profile" && <ProfileScreen nav={nav} />}
-            {screen === "reader-ranking" && <ReaderRankingScreen nav={nav} />}
+            {screen === "reader-ranking" && <Suspense fallback={<div role="status" className="pr-state">Opening Reader Arena…</div>}><ReaderArena onBack={nav.goBack} onLibrary={nav.goLibrary} /></Suspense>}
             {screen === "account" && <AccountScreen nav={nav} />}
                         {screen === "settings" && <SettingsScreen nav={nav} stores={{ profile: profileStore, library, memory: memoryStore, gems: gemsStore }} />}
             {screen === "about" && <AboutScreen nav={nav} />}
@@ -2829,11 +2829,7 @@ function ProfileScreen({ nav }) {
       </Motion.section>
 
       <Motion.section className="pf-bento" {...rise(4)}>
-        <button type="button" className="pf-tile ranking" onClick={() => nav.goReaderRanking()}>
-          <span className="pf-tile-ic"><TrendingUp size={21} /></span>
-          <span className="pf-tile-text"><b>Reader ranking</b><small>See who has spent the most time reading</small></span>
-          <ChevronRight size={18} className="pf-tile-go" />
-        </button>
+        <ReaderArenaEntry onOpen={nav.goReaderRanking} />
         <button type="button" className="pf-tile account" onClick={nav.goAccount}>
           <span className="pf-tile-ic"><Cloud size={21} /></span>
           <span className="pf-tile-text">
@@ -2865,77 +2861,6 @@ function ProfileScreen({ nav }) {
       </Motion.section>
 
       <p className="pf-foot">Reading Companion · v{APP_VERSION}</p>
-    </div>
-  );
-}
-
-function formatRankingDuration(seconds) {
-  const totalMinutes = Math.floor(seconds / 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours) return `${hours} hr${hours === 1 ? "" : "s"}${minutes ? ` ${minutes} min` : ""}`;
-  return totalMinutes ? `${totalMinutes} min` : `${seconds} sec`;
-}
-
-function ReaderRankingScreen({ nav }) {
-  const [rankings, setRankings] = useState([]);
-  const [status, setStatus] = useState("loading");
-  const [error, setError] = useState("");
-  const [requestId, setRequestId] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchReaderRankings().then((result) => {
-      if (cancelled) return;
-      setRankings(Array.isArray(result.rankings) ? result.rankings : []);
-      setStatus("ready");
-      setError("");
-    }).catch((loadError) => {
-      if (cancelled) return;
-      setStatus("error");
-      setError(loadError.message || "Reader rankings could not be loaded.");
-    });
-    return () => { cancelled = true; };
-  }, [requestId]);
-
-  function refresh() {
-    setStatus("loading");
-    setRequestId((current) => current + 1);
-  }
-
-  return (
-    <div className="screen pf-screen pr-screen">
-      <div className="aurora-bg" />
-      <header className="pf-head pr-head">
-        <button type="button" className="pf-head-back" onClick={nav.goBack} aria-label="Back to profile"><ChevronLeft size={20} /></button>
-        <div className="pr-heading"><h1>Reader ranking</h1><p>ALL-TIME READING</p></div>
-        <button type="button" className="pr-refresh" onClick={refresh} disabled={status === "loading"} aria-label="Refresh rankings" title="Refresh rankings">
-          <RefreshCw size={17} className={status === "loading" ? "spinning" : ""} />
-        </button>
-      </header>
-      <section className="pr-intro">
-        <span className="pr-intro-label"><TrendingUp size={14} /> TOTAL TIME READ</span>
-        <p>Ranked by reading time across every genre.</p>
-      </section>
-      {status === "loading" && <p className="pr-state" role="status">Loading rankings…</p>}
-      {status === "error" && (
-        <div className="pr-state pr-error" role="alert">
-          <p>{error}</p>
-          <button type="button" className="pr-retry" onClick={refresh}><RefreshCw size={15} /> Try again</button>
-        </div>
-      )}
-      {status === "ready" && rankings.length === 0 && <p className="pr-state">No reading time recorded yet.</p>}
-      {status === "ready" && rankings.length > 0 && (
-        <ol className="pr-list" aria-label="Reader rankings">
-          {rankings.map((reader) => (
-            <li key={reader.rank} className={`pr-row rank-${Math.min(reader.rank, 3)}${reader.isYou ? " is-you" : ""}`}>
-              <span className="pr-position">{reader.rank}</span>
-              <span className="pr-reader-name">{reader.name}{reader.isYou && <small>You</small>}</span>
-              <strong className="pr-reader-time">{formatRankingDuration(reader.totalSeconds)}</strong>
-            </li>
-          ))}
-        </ol>
-      )}
     </div>
   );
 }
@@ -2982,6 +2907,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [restorePrompt, setRestorePrompt] = useState(false);
   const [pendingShot, setPendingShot] = useState(null);
+  const [rejectedShot, setRejectedShot] = useState(null);
   const snapFileRef = useRef(null);
   useEffect(() => {
     if (!("wakeLock" in navigator) || typeof navigator.wakeLock.request !== "function") return undefined;
@@ -3023,6 +2949,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   useBackLayer(transcriptOpen, () => setTranscriptOpen(false));
   useBackLayer(feedOpen, () => setFeedOpen(false));
   useBackLayer(Boolean(pendingShot), () => setPendingShot(null));
+  useBackLayer(Boolean(rejectedShot), () => setRejectedShot(null));
   const snapBase64Ref = useRef(null);
   const pageRef = useRef(null);
   const pageProviderRef = useRef(createPageContextProvider());
@@ -3448,7 +3375,14 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       const response = await fetch(apiUrl("/api/reading/ask-text"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, context: `${buildLiveContext().slice(-12000)}\nCurrent printed page: ${pageRef.current?.pageNumber || "not provided"}.`, image: pageRef.current?.base64 || "" }),
+        body: JSON.stringify({
+          question,
+          context: `${buildLiveContext().slice(-12000)}\n${buildPageStatusNote(pageRef.current, ghostModeRef.current)}`,
+          pageStatus: pageCanBeSentToLive(pageRef.current) ? "verified_book_page" : pageRef.current ? "unverified" : "none",
+          verification: pageRef.current?.verification || null,
+          transcription: pageRef.current?.verification?.text || "",
+          image: pageCanBeSentToLive(pageRef.current) ? pageRef.current.base64 : "",
+        }),
       });
       if (!response.ok) throw new Error(response.status === 429 ? "Too many questions right now. Please try later." : "Text answer unavailable. Please retry.");
       const { answer } = await response.json();
@@ -3503,12 +3437,13 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   function resendSnapshot() {
     if (!LEGACY_STREAMING) return;
     const client = clientRef.current;
-    if (snapBase64Ref.current && client?.ready) void client.sendVideoFrame(snapBase64Ref.current).catch((error) => client.recover(error));
+    if (pageCanBeSentToLive(pageRef.current) && client?.ready) void client.sendVideoFrame(pageRef.current.base64).catch((error) => client.recover(error));
   }
   function clearSnapshot() {
     clearInterval(snapTimerRef.current);
     snapTimerRef.current = null;
     snapBase64Ref.current = null;
+    pageRef.current = null;
     setSnapshot(null);
     setSnapExpanded(false);
   }
@@ -3526,11 +3461,25 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     if (!file || snapBusyRef.current) return;
     try {
       const shot = await prepareSnapshot(file);
-      if (shot.quality === "dark") {
-        notify("Photo bahut andhera hai. Achhi roshni mein page ki saaf photo dobara lijiye.", "error", 5200);
+      if (shot.quality === "blurry") notify("Photo thodi dhundhli lag rahi hai. Zaroorat ho toh dobara le lijiye.", "info", 5200);
+      try {
+        const response = await fetch(apiUrl("/api/reading/verify-page"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: shot.base64 }),
+        });
+        if (!response.ok) throw new Error(`page_verification_${response.status}`);
+        shot.verification = parsePageVerificationResponse(await response.json());
+      } catch {
+        shot.verification = { kind: "unverified", confidence: 0, printedPageNumber: null, language: "unknown", text: "", reason: "" };
+      }
+      if (pageVerificationDecision(shot.verification) === "reject") {
+        setRejectedShot({ message: rejectedPageMessage(shot.verification) });
         return;
       }
-      if (shot.quality === "blurry") notify("Photo thodi dhundhli lag rahi hai. Zaroorat ho toh dobara le lijiye.", "info", 5200);
+      if (shot.verification.printedPageNumber && !pageNumberInput.trim()) {
+        setPageNumberInput(String(shot.verification.printedPageNumber));
+      }
       setPendingShot(shot);
     } catch (e) {
       notify(friendlyErrorMessage(e, "Photo padh nahi paya. Dobara snapshot lijiye."), "error");
@@ -3544,18 +3493,20 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     try {
       if (cameraRef.current) stopCameraNow();
       const isNext = Boolean(snapBase64Ref.current);
+      const enteredPageNumber = /^\d{1,5}$/.test(pageNumberInput.trim()) ? Number(pageNumberInput.trim()) : null;
       const page = {
         dataUrl: shot.dataUrl,
         base64: shot.base64,
         page: snapCountRef.current + 1,
-        pageNumber: /^\d{1,5}$/.test(pageNumberInput.trim()) ? Number(pageNumberInput.trim()) : null,
+        pageNumber: enteredPageNumber || shot.verification?.printedPageNumber || null,
+        verification: shot.verification,
         updatedAt: Math.max(Date.now(), (pageRef.current?.updatedAt || 0) + 1),
       };
       if (!LEGACY_STREAMING) {
         await savePage(bookId, page);
-        pageRef.current = page;
         setRestorePrompt(false);
       }
+      pageRef.current = page;
       snapBase64Ref.current = shot.base64;
       snapCountRef.current = page.page;
       setSnapshot(page);
@@ -3566,15 +3517,15 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       if (LEGACY_STREAMING) {
         clearInterval(snapTimerRef.current);
         snapTimerRef.current = setInterval(resendSnapshot, 15000);
-        if (client?.ready) void client.sendVideoFrame(shot.base64).catch((error) => client.recover(error));
+        if (pageCanBeSentToLive(page) && client?.ready) void client.sendVideoFrame(shot.base64).catch((error) => client.recover(error));
         setTimeout(() => {
-          if (client?.ready) void client.sendVideoFrame(shot.base64).catch((error) => client.recover(error));
+          if (pageCanBeSentToLive(page) && client?.ready) void client.sendVideoFrame(shot.base64).catch((error) => client.recover(error));
         }, 1000);
-        setTimeout(() => client?.sendText(isNext ? SNAPSHOT_NEXT_NOTE : SNAPSHOT_FIRST_NOTE), 500);
+        setTimeout(() => client?.sendText(buildPageStatusNote(page, ghostModeRef.current)), 500);
       } else if (client?.contextReady) {
         await client.updateContext(async () => {
           await pageProviderRef.current.send(client, page, client.connectionId);
-          await client.sendSilentContext(`[SYSTEM NOTE] ${isNext ? "The reader replaced the old photo. Forget only the old image and its visible page text; retain established plot facts, saved chapter summaries, and earlier page references. Do not assume the reader finished the prior page." : "The reader shared a page photo."} The printed page number was ${page.pageNumber || "not entered"}; read the number from the latest photo only if clearly legible, otherwise ask when it matters. Use only the latest image for currently visible text. Wait for the reader's question and do not reply to this note.`);
+          await client.sendSilentContext(`${buildPageStatusNote(page, ghostModeRef.current)} ${isNext ? "The reader replaced the previous photo; retain established story facts and saved summaries." : "This is the first stored page photo in this session."} Do not reply to this note.`);
         });
       }
       markActive();
@@ -4139,6 +4090,12 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     const memoryContext = memoryStore.promptContext();
     const ctx = library.getModelContext(bookId);
     const currentChapter = latestBook?.chapters?.[ctx?.currentChapterNumber];
+    const placeholderChapter = isPlaceholderChapter(currentChapter);
+    const chapterKnowledge = placeholderChapter
+      ? buildPlaceholderChapterKnowledgeBlock({ chapterNumber: ctx.currentChapterNumber, bookTitle: latestBook?.title, authorName: latestBook?.authorName })
+      : ctx.recentChapters.length
+        ? "Recent chapters: " + ctx.recentChapters.map((c) => `Ch.${c.number} "${c.title}": ${c.summary}`).join(" ")
+        : "This is the first chapter - no recap needed.";
     const pageInfo = currentChapter?.startPage
       ? ` Currently known to start at page ${currentChapter.startPage}${currentChapter.endPage ? `, ended at page ${currentChapter.endPage}` : ""}.`
       : "";
@@ -4156,6 +4113,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
         (ctx.overview ? ` ${ctx.overview}` : "") +
         (ctx.recentChapters.length ? " Recent chapters: " + ctx.recentChapters.map((c) => `Ch.${c.number} "${c.title}": ${c.summary}`).join(" ") : " This is the first chapter - no recap needed.")
       : "";
+    const groundedBookContext = groundPlaceholderBookContext(bookContext, placeholderChapter, chapterKnowledge);
     const chapterList = library.getChapters(bookId);
 const closedCount = chapterList.filter((c) => !c.isPlaceholder && isChapterClosed(c)).length;
 const curCh = latestBook?.chapters?.[ctx?.currentChapterNumber];
@@ -4184,7 +4142,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
     const pageTrackLine = trackedPage ? `\n\nPAGE HISTORY: the reader last explicitly recorded printed page ${trackedPage}. This is not proof that the current photo is page ${trackedPage}, nor that every earlier page was read or later page unread. Use the latest photo and the reader's current statement as evidence; never infer page contents or reading progress from this number alone.` : "";
     const snapshotContinuityLine = "\n\nSTORY CONTINUITY: replacing a page photo removes only access to the old image and its visible text. Retain established plot facts, saved chapter summaries, and earlier page references from this context; clearly distinguish remembered summaries from text currently visible in the latest photo.";
     const voicePolicy = LEGACY_STREAMING ? "" : `\n\nVOICE LISTENING POLICY: The microphone stays open throughout this reading session. The reader may read aloud; that is not a request for a reply. Do not interrupt or respond to book text, pauses, or background speech. Give the brief opening once, then remain silent unless the reader clearly asks you a question/request, greets you, or addresses you by ${profileStore.data.companionName || "your companion name"}. If they say they are going to read, are reading, or ask you not to interrupt, enter quiet reading mode and stay silent while continuing to listen. Leave quiet mode only when they clearly address you or ask a direct question (including Hindi/Hinglish such as 'iska matlab kya hai', 'samjhao', or 'achha ye batao'). After answering, listen for follow-ups; never announce that listening has stopped. Current quiet-reading state: ${readingModeRef.current ? "ON" : "OFF"}.`;
-    return (LEGACY_STREAMING ? READER_PROFILE : SNAPSHOT_READER_PROFILE) + "\n\n" + buildTimeLine() + profileLine + bookContext + progressLine + pageTrackLine + snapshotContinuityLine + contLine + recapLine + (memoryContext ? `\n\n${memoryContext}` : "") + voicePolicy;
+    return (LEGACY_STREAMING ? READER_PROFILE : SNAPSHOT_READER_PROFILE) + "\n\n" + buildTimeLine() + profileLine + groundedBookContext + progressLine + pageTrackLine + snapshotContinuityLine + contLine + recapLine + (memoryContext ? `\n\n${memoryContext}` : "") + voicePolicy;
     }
 
   async function connectSession() {
@@ -4225,7 +4183,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
             notify("Voice connection interrupted the question. Please ask again or type it below.", "error");
           }
           if (LEGACY_STREAMING && s === "connected" && snapBase64Ref.current) {
-            setTimeout(() => { resendSnapshot(); clientRef.current?.sendText(SNAPSHOT_REMINDER_NOTE); }, 600);
+            setTimeout(() => { resendSnapshot(); clientRef.current?.sendText(buildPageStatusNote(pageRef.current, ghostModeRef.current)); }, 600);
           }
         },
         onReady: async (connectionId) => {
@@ -4234,9 +4192,9 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
             const page = pageRef.current;
             if (page) {
               await pageProviderRef.current.send(clientRef.current, page, connectionId);
-              await clientRef.current.sendSilentContext(`[SYSTEM NOTE] The current page is a fixed photo; its printed page number was ${page.pageNumber || "not entered"}. It is not live video. If a printed number is clearly legible, use it; otherwise ask the reader for the page number when it matters. Read only words visible in this latest photo; if a word or line cannot be identified, ask for the exact line or a clearer snapshot. Do not guess. Replacing a photo discards only the previous image, not saved chapter summaries or established story context in your instructions. ${ghostModeRef.current ? "Author's Ghost Mode is on: use the author's broad themes without claiming to be the author." : "Author's Ghost Mode is off."} The book, chapter, memories and reading history are in your instructions. Wait for the reader's question.`);
+              await clientRef.current.sendSilentContext(`${buildPageStatusNote(page, ghostModeRef.current)} The book, chapter, memories and reading history are in your instructions. Wait for the reader's question.`);
             } else {
-              await clientRef.current.sendSilentContext(`[SYSTEM NOTE] No page photo is available. You know the book, chapter, memories and reading history from your instructions, but do not claim to see the page or assume which page the reader has reached. If the reader refers to a specific page or line, ask them to share a photo; read a page number only when clearly legible and otherwise ask. ${ghostModeRef.current ? "Author's Ghost Mode is on." : "Author's Ghost Mode is off."} Wait for the reader's question.`);
+              await clientRef.current.sendSilentContext(`${buildPageStatusNote(null, ghostModeRef.current)} You know only the book, chapter, memories and reading history in your instructions. Wait for the reader's question.`);
             }
             if (pageRef.current?.updatedAt === page?.updatedAt) {
               if (clientRef.current?.hasOpenedOnce && !micGateRef.current?.active) micGateRef.current?.start();
@@ -4656,6 +4614,18 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
             <div className="modal-actions">
               <button className="icon-button ghost" onClick={() => { setPendingShot(null); snapFileRef.current?.click(); }}>Retake</button>
               <button className="primary-button" disabled={snapBusy} onClick={() => commitSnapshot(pendingShot)}>{snapBusy ? "Saving…" : "Use this photo"}</button>
+            </div>
+          </Motion.div>
+        </Motion.div>,
+        document.body
+      )}
+      {rejectedShot && createPortal(
+        <Motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={INTERACTION_SPRING}>
+          <Motion.div className="modal-card elevated" role="alertdialog" aria-modal="true" aria-labelledby="rejected-page-title" initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={INTERACTION_SPRING}>
+            <h2 id="rejected-page-title">Photo check</h2>
+            <p>{rejectedShot.message}</p>
+            <div className="modal-actions">
+              <button className="primary-button" onClick={() => { setRejectedShot(null); snapFileRef.current?.click(); }}>Retake</button>
             </div>
           </Motion.div>
         </Motion.div>,

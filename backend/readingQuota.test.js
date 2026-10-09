@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   isUserId,
   normalizeDailyLimitMinutes,
+  normalizeRankingPeriod,
   normalizeReaderName,
   normalizeUsageSeconds,
   parseAdminUserIds,
@@ -34,6 +35,13 @@ test("reader names are trimmed, collapsed, and bounded", () => {
   assert.equal(normalizeReaderName("R".repeat(40)).length, 30);
 });
 
+test("ranking period accepts only weekly and all-time values", () => {
+  assert.equal(normalizeRankingPeriod(undefined), "all_time");
+  assert.equal(normalizeRankingPeriod("weekly"), "weekly");
+  assert.equal(normalizeRankingPeriod("all_time"), "all_time");
+  assert.equal(normalizeRankingPeriod("monthly"), null);
+});
+
 test("ranking response validates rows and marks the signed-in reader", () => {
   assert.deepEqual(readerRankingResponse([
     { rank_position: "1", reader_name: "Asha", total_reading_seconds: "3661", user_id: "ABC" },
@@ -44,6 +52,13 @@ test("ranking response validates rows and marks the signed-in reader", () => {
   ]);
   assert.throws(() => readerRankingResponse([{ rank_position: 0, total_reading_seconds: -1 }], "abc"), /invalid_reader_rankings/);
   assert.throws(() => readerRankingResponse(null, "abc"), /invalid_reader_rankings/);
+});
+
+test("reader rankings preserve tied rank positions", () => {
+  assert.deepEqual(readerRankingResponse([
+    { rank_position: 1, reader_name: "Asha", total_reading_seconds: 100, user_id: "a" },
+    { rank_position: 1, reader_name: "Noor", total_reading_seconds: 100, user_id: "b" },
+  ], "none").map((reader) => reader.rank), [1, 1]);
 });
 
 test("quota response clamps remaining time and exposes admin capability", () => {

@@ -287,7 +287,14 @@ const BASE_HELP_GUIDE = [
     title: "Profile, avatar and companion",
     keywords: ["profile", "reader profile", "avatar", "change avatar", "upload photo", "remove photo", "companion", "mascot", "owl", "robot", "sprout", "fox", "book"],
     screen: "profile",
-    content: "The **Profile** card lets you change your photo, edit your name, open the avatar picker, and choose your reading companion. Tap the main photo or the small camera button to upload an image, then crop it in a circle before saving. Tap **Change avatar** to open the preset avatar tray, and **Remove photo** appears there when you have a custom photo. Below the card are **Account**, **Settings**, **Report an issue**, **Help & guide**, and **About**.",
+    content: "The **Profile** card lets you change your photo, edit your name, open the avatar picker, and choose your reading companion. Tap the main photo or the small camera button to upload an image, then crop it in a circle before saving. Tap **Change avatar** to open the preset avatar tray, and **Remove photo** appears there when you have a custom photo. The **Reader Arena** card opens weekly and all-time reading rankings and shows your live weekly place. Below it are **Account**, **Settings**, **Report an issue**, **Help & guide**, and **About**.",
+  },
+  {
+    id: "reader-arena",
+    title: "Reader Arena",
+    keywords: ["reader arena", "arena", "reader ranking", "reading leaderboard", "weekly reading rank", "all time ranking", "rank readers", "reading race"],
+    screen: "profile",
+    content: "Open **Profile** and tap **Reader Arena** to compare actual reading time with other readers. **This week** ranks time from Monday 00:00 to Sunday 24:00 India time and shows when the race resets; **All time** shows lifetime reading time. The podium and reader cards show rank, reader name and time. Tap a reader for those same public ranking details. Your own place stays pinned at the bottom; a new reading session starts your race if you are not ranked yet.",
   },
   {
     id: "account-sync",
@@ -471,7 +478,7 @@ export function getRelevantHelp(query) {
 const HELP_GUIDE_TAGLINE = "If you want, you can always ask **Help & guide** about the next step too.";
 
 const SHORT_ANSWERS = {
-  "camera-options": "1. **Snap page** or **Page snapshot** sends one still photo. When you turn the page, send a new snapshot; it replaces the old image, not the saved story context.\n2. The companion uses the latest photo with your question. There is no live camera video; earlier page images are not retained.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
+  "camera-options": "1. **Snap page** or **Page snapshot** sends one still photo. The app checks whether it shows book text; an unreadable photo asks you to retake it.\n2. When verification is unavailable, the companion will not read lines from that photo. Share a clear page and enter its printed number if needed. **Next page** replaces the previous photo. Snapshot mode has no live camera video.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
   "session-buttons": "1. Use **Snap page**, **Tap to ask** / **Done speaking**, optional **Hands-free**, or **Ask by typing** above the reading dock.\n2. The dock has **Mic**, **Page snapshot**, **Transcript**, **Ghost** and **End session**; Transcript includes **Re-sync**.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
   "ghost-mode": "1. Turn on **Ghost** in the reading dock to hear ideas through the author’s themes and perspective.\n2. It works best after you have set the author for that book in **Library**.\n\nIf you want, you can always ask **Help & guide** about the next step too.",
   "story-recap": "1. Tap the **Play** icon on a **Library** book tile to open the recap card, then use **Hear the story** beside **Start Reading**.\n2. Story theatre gives you **Pause**, **Captions**, **Mute**, **Replay**, and a final **Padhna shuru karo** button.\n\nIf you want, you can always ask **Help & guide** about the next step too.",

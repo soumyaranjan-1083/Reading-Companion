@@ -10,7 +10,8 @@ import { getAiProviderOrder, readTextCompletion, requestTextCompletion, streamTe
 import { normalizeGemEchoCatalog, validateGemEchoCandidates, validateGemEchoPairs } from "./gemEchoes.js";
 import { classifyGeminiFailure, KeyPool } from "./geminiKeyPool.js";
 import { verifyDocsOwner, loadDocsBundle } from "./docsAccess.js";
-import { isUserId, normalizeDailyLimitMinutes, normalizeReaderName, normalizeUsageSeconds, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
+import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
+import { parsePageVerification } from "./pageVerification.js";
 import { registerDocsNarration } from "./docsNarration.js";
 import { buildChunks, retrieve, buildMessages, pickCited } from "./docsHelper.js";
 import { buildPushPayload, createPushService, normalizeReminderMinute, normalizeSubscription } from "./pushNotifications.js";
@@ -34,6 +35,7 @@ app.use("/api/bug-reports/screenshots", express.json({ limit: "7mb" }));
 app.use("/api/bug-reports", express.json({ limit: "7mb" }));
 app.use("/api/book-lookup/toc-scan", express.json({ limit: "10mb" }));
 app.use("/api/reading/ask-text", express.json({ limit: "6mb" }));
+app.use("/api/reading/verify-page", express.json({ limit: "6mb" }));
 app.use("/api/reading/classify-utterance", express.json({ limit: "2mb" }));
 app.use(express.json());
 
@@ -53,6 +55,7 @@ const AI_REQUEST_LIMITS = {
   tocScan: { perIpHour: 40, serviceDaily: 400 },
   bookSearch: { perIpHour: 90, serviceDaily: 4000 },
   readingText: { perIpHour: 40, serviceDaily: 400 },
+  readingVerify: { perIpHour: 40, serviceDaily: 400 },
   readingClassify: { perIpHour: 1200, serviceDaily: 10000 },
 };
 const aiIpWindows = new Map();
@@ -709,17 +712,59 @@ async function generateGeminiContent({ model, contents, config }) {
   return withGeminiFailover(async (geminiClient) => geminiClient.models.generateContent({ model, contents, config }));
 }
 
+const PAGE_VERIFICATION_PROMPT = [
+  "Inspect this image for a reading companion. Classify it as exactly one of: book_page, screen_with_book_text, not_a_book_page, unreadable.",
+  "A phone or e-reader screen showing book prose is screen_with_book_text. Code editors, dashboards, chats, social apps, blank photos, people, walls, and random non-book photos are not_a_book_page.",
+  "Transcribe only visible body text. Never complete, infer, or guess words; mark each unclear word as [unclear]. If no readable body text exists, return an empty text string and classify unreadable if the image itself cannot be reliably assessed/read.",
+  "Return only valid JSON with fields kind, confidence (0 to 1), printedPageNumber (integer or null), language, text, and a short reason describing visible evidence. Do not invent a printed page number.",
+].join("\n");
+
+app.post("/api/reading/verify-page", async (req, res) => {
+  const image = typeof req.body?.image === "string" ? req.body.image : "";
+  if (!image || image.length > 5_500_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image)) {
+    return res.status(400).json({ error: "invalid_page_image" });
+  }
+  if (!allowAiRequestForResponse(req, res, "readingVerify")) return;
+  try {
+    const result = await generateGeminiContent({
+      model: process.env.READING_VERIFY_MODEL || process.env.READING_TEXT_MODEL || "gemini-3.5-flash-lite",
+      contents: [{ role: "user", parts: [
+        { text: PAGE_VERIFICATION_PROMPT },
+        { inlineData: { mimeType: "image/jpeg", data: image } },
+      ] }],
+      config: { temperature: 0, maxOutputTokens: 900, responseMimeType: "application/json" },
+    });
+    const output = result.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+    return res.json(parsePageVerification(output));
+  } catch (error) {
+    console.warn("[READING_VERIFY] unavailable:", redactSecrets(error?.message || error, 180));
+    return res.status(503).json({ error: "page_verification_unavailable" });
+  } finally {
+    finishAiRequest();
+  }
+});
+
 app.post("/api/reading/ask-text", async (req, res) => {
   const question = typeof req.body?.question === "string" ? req.body.question.trim().slice(0, 800) : "";
   const context = typeof req.body?.context === "string" ? req.body.context.slice(0, 14000) : "";
   const image = typeof req.body?.image === "string" ? req.body.image : "";
+  const pageStatus = req.body?.pageStatus;
+  const verificationKind = req.body?.verification?.kind;
+  const transcription = typeof req.body?.transcription === "string" ? req.body.transcription.slice(0, 12000) : "";
   if (!question || !context || (image && !/^[A-Za-z0-9+/=]+$/.test(image))) {
     return res.status(400).json({ error: "invalid_reading_question" });
   }
   if (!allowAiRequestForResponse(req, res, "readingText")) return;
   try {
-    const parts = [{ text: "Answer this reader's question based on their book context and the supplied page. Do not invent text that you cannot see. If the page is missing or unclear, ask for a clearer snapshot or the exact line. Reply concisely in the reader's language. This is a text fallback: do not claim to save or change app data." }];
-    if (image) parts.push({ inlineData: { mimeType: "image/jpeg", data: image } });
+    const verifiedPage = pageStatus === "verified_book_page" && ["book_page", "screen_with_book_text"].includes(verificationKind);
+    const safeImage = verifiedPage ? image : "";
+    const pageNote = pageStatus === "unverified"
+      ? "PAGE_STATUS: unverified. The reader says this is their page, but it was not verified. Do not claim to see, read, describe, or quote it. Do not answer page-text questions from guesses; ask the reader to read the line aloud or share a clear photo."
+      : pageStatus === "none"
+        ? "PAGE_STATUS: none. No page photo exists. Do not claim to see, read, describe, or quote a page."
+        : `PAGE_STATUS: ${verifiedPage ? "verified_book_page" : "none"}. App transcription (may contain OCR mistakes): <<<${verifiedPage ? transcription : ""}>>>. Use only this transcription and clearly supported visible text.`;
+    const parts = [{ text: `Answer only from the reader's words, supplied context, and the page status/transcription below. Never invent. If the page is missing or unverified, say so plainly and ask for the exact line or a clear photo. Reply concisely in the reader's language. This is a text fallback: do not claim to save or change app data.\n${pageNote}` }];
+    if (safeImage) parts.push({ inlineData: { mimeType: "image/jpeg", data: safeImage } });
     parts.push({ text: `Book and reader context:\n${context}\n\nQuestion:\n${question}` });
     const result = await generateGeminiContent({
       model: process.env.READING_TEXT_MODEL || "gemini-3.5-flash-lite",
@@ -1298,10 +1343,12 @@ async function getAuthenticatedQuotaUser(req, res) {
   const readingLimitAdmins = parseAdminUserIds(process.env.SESSION_LIMIT_ADMIN_USER_IDS);
   app.get("/api/reading/rankings", async (req, res) => {
     res.set("Cache-Control", "no-store");
+    const period = normalizeRankingPeriod(req.query.period);
+    if (!period) return res.status(400).json({ error: "invalid_reader_ranking_period" });
     const userId = await getAuthenticatedQuotaUser(req, res);
     if (!userId) return;
     try {
-      const rows = await callReadingQuotaRpc("get_reading_companion_reader_rankings", {}, true);
+      const rows = await callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: period }, true);
       return res.json({ rankings: readerRankingResponse(rows, userId) });
     } catch (error) {
       console.error("[READING_RANKINGS] fetch failed:", redactSecrets(error?.message || error, 160));

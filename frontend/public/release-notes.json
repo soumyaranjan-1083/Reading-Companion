@@ -1,6 +1,19 @@
 {
   "releases": [
     {
+      "version": "2.4.0",
+      "arena": true,
+      "date": "2026-10-09",
+      "title": "Reader Arena & Honest Eyes",
+      "items": [
+        { "type": "feature", "text": "Reader Arena brings weekly and all-time reading rankings, no matter which genres you read" },
+        { "type": "feature", "text": "A new card on your Profile shows your place in this week’s reading race and when it resets" },
+        { "type": "improve", "text": "The rankings now have a completely new animated Arena experience" },
+        { "type": "fix", "text": "Your companion checks whether a photo really shows a book page before using it, and asks you to retake an unrelated or unreadable photo" },
+        { "type": "fix", "text": "Your companion now says plainly when it cannot see a page or does not know a chapter, instead of guessing" }
+      ]
+    },
+    {
       "version": "2.3.0",
       "pulse": true,
       "date": "2026-10-06",
