@@ -222,8 +222,8 @@ export const HELP_FEATURE_MANIFEST = [
   {
     name: "gem card studio and chat diagram",
     entryId: "gem-detail",
-    files: ["GemStoryCard.jsx", "gemTemplates/index.js", "helpAnimations.js", "HelpAnimations.jsx"],
-    includes: ["Choose gem card template", "Surprise me", "Export aspect ratio", "id: \"gem-download\"", "Choose a template", "kind: \"flow\""],
+    files: ["GemStoryCard.jsx", "gemTemplates/index.js", "gemTemplates/aspect.js", "gemTemplates/templates.test.js", "helpAnimations.js", "HelpAnimations.jsx"],
+     includes: ["Choose gem card template", "Surprise me", "gsc-palette-row", "Show artwork", "aspect = \"9:16\"", "width:1080px;height:${dimensions.height}px", "id: \"gem-download\"", "Choose a template", "kind: \"flow\""],
   },
   {
     name: "updates and release notes screen",
