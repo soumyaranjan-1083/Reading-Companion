@@ -172,3 +172,43 @@ test("opening mic fallback retries until the session becomes ready", () => {
     }, 20);
   });
 });
+
+test("paused Live sessions send no automatic audio, text, image, or context", async () => {
+  const events = [];
+  const client = new GeminiLiveClient({ modelName: "test", config: {}, handlers: { onStatus: (status) => events.push(status) } });
+  client.ready = true;
+  client.contextReady = true;
+  client.session = {
+    sendRealtimeInput: async (input) => events.push(input),
+    sendClientContent: async (input) => events.push(input),
+    close() {},
+  };
+  client.pause();
+  client._watch();
+  await client._handleTransportError(new Error("muted transport"));
+  await client.sendAudio("audio");
+  await client.sendText("automatic quiet note");
+  client.startAudio();
+  client.endAudio();
+  await assert.rejects(client.sendVideoFrame("image"), /voice_session_not_ready/);
+  await assert.rejects(client.sendSilentContext("context"), /voice_session_not_ready/);
+  assert.deepEqual(events, []);
+  assert.equal(client.audioBacklog.length, 0);
+  client.resume();
+  await client.sendAudio("after-unmute");
+  await client.audioSendChain;
+  assert.equal(events.length, 1);
+  await client.close();
+});
+
+test("mute cancellation ends the active response before pausing the connection", () => {
+  const events = [];
+  const client = new GeminiLiveClient({ modelName: "test", config: {}, handlers: {} });
+  client.ready = true;
+  client.session = { sendRealtimeInput: async (input) => { events.push(input); }, close() {} };
+  client.cancelResponse();
+  client.pause();
+  assert.deepEqual(events, [{ audioStreamEnd: true }]);
+  assert.equal(client.paused, true);
+  void client.close();
+});

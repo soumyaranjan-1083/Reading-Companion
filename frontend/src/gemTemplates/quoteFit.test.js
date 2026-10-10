@@ -30,3 +30,13 @@ test("Devanagari combining marks and emoji are wrapped as graphemes", () => {
   assert.ok(fit.height <= 300);
   assert.equal(fit.lines.join(" "), quote.trim());
 });
+
+test("very long quotes stay at least 56px and ellipsize within the available card region", () => {
+  const quote = "A thoughtful reader can carry a sentence into a completely different day. ".repeat(8);
+  const fit = fitQuoteText(quote, { width: 700, height: 280, maxFontSize: 82, minFontSize: 56 });
+  assert.ok(fit.fontSize >= 56);
+  assert.ok(fit.height <= 280);
+  assert.equal(fit.truncated, true);
+  assert.ok(fit.text.endsWith("…"));
+  assert.notEqual(fit.lines.join(" "), quote.trim());
+});

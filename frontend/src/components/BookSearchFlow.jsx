@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   BookOpen,
   Camera,
   Check,
@@ -16,11 +18,14 @@ import {
   X,
 } from "lucide-react";
 import { apiFetch } from "../api.js";
+import { searchStageAfter } from "./bookSearchStages.js";
+import { mergeManualContents, restoreManualBookDraft } from "../manualBookFlow.js";
 import "./BookSearchFlow.css";
 
 const STEPS = ["Finding the book", "Getting author details", "Fetching chapters", "Adding to your library"];
 const STEP_ICONS = [Search, UserRound, ListChecks, LibraryBig];
 const MAX_PHOTOS = 6;
+const MANUAL_DRAFT_KEY = "rc_manual_book_draft";
 const IDLE_BRAVE = { available: false, candidate: "", busy: false, none: false };
 const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -152,13 +157,18 @@ function defaultBook(candidate, fallbackAuthors = []) {
   };
 }
 
-export default function BookSearchFlow({ initialTitle = "", findExisting, onSave, onManual, onClose }) {
-  const [stage, setStage] = useState("query"); // query | results | editions | working | scan | review | duplicate | error
-  const [query, setQuery] = useState(initialTitle);
+export default function BookSearchFlow({ mode = "search", initialTitle = "", findExisting, onSave, onManualSave, onManual, onClose }) {
+  const [manualDraft] = useState(() => {
+    if (mode !== "manual") return null;
+    try { return restoreManualBookDraft(sessionStorage.getItem(MANUAL_DRAFT_KEY), initialTitle); }
+    catch { return restoreManualBookDraft(null, initialTitle); }
+  });
+  const [stage, setStage] = useState(() => mode === "manual" ? manualDraft.step : "query"); // search stages remain isolated from manual onboarding
+  const [query, setQuery] = useState(() => mode === "manual" ? manualDraft.title : initialTitle);
   const [results, setResults] = useState([]);
   const [selectedWork, setSelectedWork] = useState(null);
-  const [book, setBook] = useState(null);
-  const [chapters, setChapters] = useState([]);
+  const [book, setBook] = useState(() => mode === "manual" ? { title: manualDraft.title, authors: [], coverUrl: "", primaryIsbn: "" } : null);
+  const [chapters, setChapters] = useState(() => mode === "manual" ? manualDraft.chapters : []);
   const [portrait, setPortrait] = useState("");
   const [bio, setBio] = useState("");
   const [brave, setBrave] = useState(IDLE_BRAVE);
@@ -168,7 +178,10 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
   const [message, setMessage] = useState("");
   const [fromScan, setFromScan] = useState(false);
   const [workingCover, setWorkingCover] = useState("");
-  const [authorText, setAuthorText] = useState("");
+  const [authorText, setAuthorText] = useState(() => mode === "manual" ? manualDraft.authorText : "");
+  const [authorType, setAuthorType] = useState(() => mode === "manual" ? manualDraft.authorType : "Author");
+  const [savingManual, setSavingManual] = useState(false);
+  const maxPhotos = mode === "manual" ? 3 : MAX_PHOTOS;
   const alive = useRef(true);
   const lastAction = useRef(null);
   const requestRef = useRef({ id: 0, controller: null });
@@ -180,6 +193,15 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
       requestRef.current.controller?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (mode !== "manual" || !["title", "author", "contents", "review"].includes(stage)) return;
+    try {
+      sessionStorage.setItem(MANUAL_DRAFT_KEY, JSON.stringify({
+        step: stage, title: query, authorType, authorText, chapters,
+      }));
+    } catch { /* manual progress remains usable when storage is unavailable */ }
+  }, [mode, stage, query, authorType, authorText, chapters]);
 
   const beginRequest = () => {
     requestRef.current.controller?.abort();
@@ -203,6 +225,55 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
     setWorkingCover("");
   };
     const authorName = authorText.trim().split(/\s*(?:,|&| and )\s*/i)[0] || book?.authors?.[0] || selectedWork?.authors?.[0] || "";
+
+  function continueManualTitle() {
+    const title = query.trim();
+    if (!title) return;
+    const existing = findExisting?.(title);
+    if (existing) {
+      setMessage(`"${existing.title}" is already in your library.`);
+      return;
+    }
+    setBook({ title, authors: [], coverUrl: "", primaryIsbn: "" });
+    setMessage("");
+    setStage("author");
+  }
+
+  async function continueManualAuthor() {
+    const name = authorText.trim();
+    if (name && authorType === "Author") {
+      setMessage("Looking up optional author details…");
+      try {
+        const extra = await post("/api/book-lookup/author-photo", { authorName: name, bookTitle: book?.title || query.trim() }, { retries: 1 });
+        if (alive.current) {
+          if (extra?.bio) setBio(extra.bio);
+          if (extra?.dataUrl) setPortrait(extra.dataUrl);
+        }
+      } catch {
+        // Author details are optional; continue with the reader's entry.
+      }
+    }
+    if (!alive.current) return;
+    setMessage("");
+    setPhotos([]);
+    setStage("contents");
+  }
+
+  function skipManualContents() {
+    setChapters([{ number: 1, section: null, title: "", author: null, startPage: null, confidence: "low" }]);
+    setFromScan(false);
+    setStage("review");
+  }
+
+  function moveChapter(index, direction) {
+    setChapters((list) => {
+      const next = [...list];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return list;
+      [next[index], next[target]] = [next[target], next[index]];
+      return next.map((chapter, row) => ({ ...chapter, number: row + 1 }));
+    });
+  }
 
   async function search(event) {
     event?.preventDefault();
@@ -229,7 +300,7 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
         if (!isCurrent(id)) return;
       }
       setResults(data.books);
-      setStage("results");
+      setStage(searchStageAfter("query", "search-complete"));
     } catch (error) {
       if (error?.name === "AbortError" || !alive.current) return;
       setFailed(0);
@@ -275,7 +346,7 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
       if (!details.editions?.length) {
         setMessage("I found the book, but I could not load its editions right now. Try again, or add it manually.");
         setFailed(2);
-        setStage("error");
+        setStage(mode === "manual" ? "contents" : "error");
         return;
       }
       setSelectedWork({ ...candidate, editions: details.editions });
@@ -305,10 +376,10 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
     setAuthorText((picked.authors || []).join(", "));
     if (picked.chapters?.length) {
       setChapters(picked.chapters);
-      setStage("review");
+      setStage(searchStageAfter("editions", "edition-has-chapters"));
     } else {
       setChapters([]);
-      setStage("scan");
+      setStage(searchStageAfter("editions", "edition-needs-scan"));
     }
   }
 
@@ -325,7 +396,7 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
   }
 
   async function addPhotos(fileList) {
-    const files = [...fileList].slice(0, MAX_PHOTOS - photos.length);
+    const files = [...fileList].slice(0, maxPhotos - photos.length);
     const next = [];
     for (const file of files) {
       try {
@@ -334,7 +405,7 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
         // Skip unreadable files.
       }
     }
-    if (alive.current && next.length) setPhotos((prev) => [...prev, ...next].slice(0, MAX_PHOTOS));
+    if (alive.current && next.length) setPhotos((prev) => [...prev, ...next].slice(0, maxPhotos));
   }
 
   async function scan() {
@@ -346,15 +417,19 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
     try {
       const data = await post("/api/book-lookup/toc-scan", { images: photos }, { retries: 0, signal: controller.signal });
       if (!isCurrent(id)) return;
-      if (!data.chapters?.length) {
-        setMessage("I could not read any chapters from those photos. Try a clearer, well-lit photo of the contents page.");
-        setStage("scan");
+      if (data.error || !data.chapters?.length) {
+        setMessage(data.error === "not_contents_page"
+          ? "This does not look like a contents page. Photograph the printed list in good light with the whole page flat and in frame."
+          : "I could not read the contents. Try good light, a flat page, and the whole page in frame, or add chapters yourself.");
+        setStage(mode === "manual" ? "contents" : "scan");
         return;
       }
-      setChapters(data.chapters);
+      setChapters(mode === "manual"
+        ? mergeManualContents([data.chapters])
+        : data.chapters.map((chapter, index) => ({ section: null, author: null, confidence: "high", ...chapter, number: index + 1 })));
       setFromScan(true);
       setPhotos([]);
-      setStage("review");
+      setStage(mode === "manual" ? "review" : searchStageAfter("scan", "scan-complete"));
     } catch (error) {
       if (error?.name === "AbortError" || !alive.current) return;
       if (error.status === 429) setMessage("You have scanned a lot of pages for now. Please try again in a while, or add the book manually.");
@@ -368,7 +443,7 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
 
   const updateChapter = (index, patch) => setChapters((list) => list.map((chapter, n) => (n === index ? { ...chapter, ...patch } : chapter)));
   const removeChapter = (index) => setChapters((list) => list.filter((_, n) => n !== index));
-  const addChapter = () => setChapters((list) => [...list, { number: list.length + 1, title: "", startPage: null }]);
+  const addChapter = () => setChapters((list) => [...list, { number: list.length + 1, section: list.at(-1)?.section || null, title: "", author: null, startPage: null, confidence: "low" }]);
 
    async function save() {
     const cleanChapters = chapters
@@ -380,6 +455,23 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
     if (duplicate) {
       setMessage(`"${duplicate.title}" is already in your library.`);
       setStage("duplicate");
+      return;
+    }
+    if (mode === "manual") {
+      setSavingManual(true);
+      try {
+        await onManualSave({
+          title: book.title.trim(), authorName: authorText.trim(), authorType,
+          authorBio: bio, portrait, chapters: cleanChapters,
+        });
+        try { sessionStorage.removeItem(MANUAL_DRAFT_KEY); } catch { /* ignore unavailable storage */ }
+      } catch {
+        if (alive.current) {
+          setSavingManual(false);
+          setMessage("The book could not be saved. Your reviewed chapters are still here.");
+          setStage("review");
+        }
+      }
       return;
     }
     requestRef.current.controller?.abort();
@@ -411,6 +503,7 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
         bio: finalBio,
         chapters: cleanChapters,
       });
+      setStage(searchStageAfter("review", "save-complete"));
     } catch {
       if (alive.current) {
         setFailed(3);
@@ -421,6 +514,13 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
   }
   function goBack() {
     requestRef.current.controller?.abort();
+    if (mode === "manual") {
+      if (stage === "author") setStage("title");
+      else if (stage === "contents") setStage("author");
+      else if (stage === "review") setStage("contents");
+      else setStage("title");
+      return;
+    }
     if (stage === "results") setStage("query");
     else if (stage === "editions") setStage("results");
     else if (stage === "review" || stage === "scan" || stage === "duplicate") setStage("editions");
@@ -435,11 +535,33 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
         {stage !== "query" && stage !== "working" ? (
           <button type="button" className="bsf-icon" aria-label="Back" onClick={goBack}><ArrowLeft size={18} /></button>
         ) : <span className="bsf-icon-gap" />}
-        <h2>Search a book</h2>
+        <h2>{mode === "manual" ? "Add a book" : "Search a book"}</h2>
         <button type="button" className="bsf-icon" aria-label="Close" onClick={onClose}><X size={18} /></button>
       </header>
 
-      {stage === "query" && (
+      {mode === "manual" && stage === "title" && (
+        <form className="bsf-body" onSubmit={(event) => { event.preventDefault(); continueManualTitle(); }}>
+          <p className="bsf-hint">Start with the title exactly as it appears on your book.</p>
+          <div className="bsf-field"><BookOpen size={17} aria-hidden="true" /><input autoFocus value={query} onChange={(event) => { setQuery(event.target.value); setMessage(""); }} placeholder="Book title" aria-label="Book title" /></div>
+          {message && <p className="bsf-msg err"><AlertTriangle size={16} />{message}</p>}
+          <div className="bsf-actions"><button type="button" className="icon-button ghost" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!query.trim()}>Continue</button></div>
+        </form>
+      )}
+
+      {mode === "manual" && stage === "author" && (
+        <div className="bsf-body">
+          <p className="bsf-hint">Who wrote this book? Textbooks may have an editor, publisher, or several contributors. You can leave this blank.</p>
+          <label className="bsf-label" htmlFor="manual-author">{authorType}</label>
+          <input id="manual-author" className="bsf-author bsf-manual-author" value={authorText} onChange={(event) => setAuthorText(event.target.value)} placeholder={`${authorType} name (optional)`} />
+          <div className="bsf-role-options" aria-label="Book credit type">
+            {["Author", "Editor", "Publisher", "Multiple authors"].map((role) => <button key={role} type="button" aria-pressed={authorType === role} className={authorType === role ? "selected" : ""} onClick={() => setAuthorType(role)}>{role}</button>)}
+          </div>
+          {message && <p className="bsf-hint" role="status">{message}</p>}
+          <div className="bsf-actions"><button type="button" className="icon-button ghost" onClick={goBack}>Back</button><button type="button" className="primary-button" onClick={continueManualAuthor}>Contents page</button></div>
+        </div>
+      )}
+
+      {mode === "search" && stage === "query" && (
         <form className="bsf-body" onSubmit={search}>
           <p className="bsf-hint">Type the title and I will look up matching editions from public book catalogues. Only the book&apos;s details are read, never the book.</p>
           <div className="bsf-field">
@@ -526,25 +648,27 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
         </div>
       )}
 
-      {stage === "scan" && book && (
+      {((mode === "search" && stage === "scan") || (mode === "manual" && stage === "contents")) && book && (
         <div className="bsf-body">
-          <div className="bsf-book"><Cover src={book.coverUrl} /><span className="bsf-book-text"><b>{book.title}</b><small>{author || "Author unknown"}</small></span></div>
-          <p className="bsf-msg"><AlertTriangle size={16} />I could not find this edition&apos;s chapters online.</p>
+          <div className="bsf-book"><Cover src={book.coverUrl} /><span className="bsf-book-text"><b>{book.title}</b><small>{author || "Author details optional"}</small></span></div>
+          {mode === "search" && <p className="bsf-msg"><AlertTriangle size={16} />I could not find this edition&apos;s chapters online.</p>}
           <h3 className="bsf-sub">Upload the book&apos;s contents page</h3>
-          <p className="bsf-hint">Take a clear photo of the contents page. If it spans more pages, add them all (up to {MAX_PHOTOS}). Photos are read once and not stored.</p>
+          <p className="bsf-hint">Take a clear photo of the contents page. For long contents, add up to {maxPhotos} photos in order. Photos are read once and not stored.</p>
           {message && <p className="bsf-msg err"><AlertTriangle size={16} />{message}</p>}
           <div className="bsf-thumbs">
             {photos.map((photo, index) => (
               <span key={index} className="bsf-thumb"><img src={photo} alt={`Contents page ${index + 1}`} /><button type="button" aria-label="Remove photo" onClick={() => setPhotos((list) => list.filter((_, n) => n !== index))}><X size={12} /></button></span>
             ))}
-            {photos.length < MAX_PHOTOS && (
+            {photos.length < maxPhotos && (
               <label className="bsf-add"><ImagePlus size={20} /><span>Add photo</span>
                 <input type="file" accept="image/*" multiple capture="environment" hidden onChange={(event) => { addPhotos(event.target.files); event.target.value = ""; }} />
               </label>
             )}
           </div>
           <div className="bsf-actions">
-            <button type="button" className="icon-button ghost" onClick={() => onManual(book.title, "manual", author)}>Add manually</button>
+            {mode === "manual"
+              ? <button type="button" className="icon-button ghost" onClick={skipManualContents}>Skip, I&apos;ll add chapters manually</button>
+              : <button type="button" className="icon-button ghost" onClick={() => onManual(book.title, "manual", author)}>Add manually</button>}
             <button type="button" className="primary-button" disabled={!photos.length} onClick={scan}><Camera size={15} /> Read contents</button>
           </div>
         </div>
@@ -556,7 +680,8 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
             <Cover src={book.coverUrl} />
             <span className="bsf-book-text">
               <input className="bsf-title" value={book.title} onChange={(event) => setBook({ ...book, title: event.target.value })} aria-label="Book title" />
-                            <small className="bsf-by"><Avatar name={author} src={portrait || brave.candidate} size={20} /><input className="bsf-author" value={authorText} onChange={(event) => setAuthorText(event.target.value)} placeholder="Author name" aria-label="Author name" /></small>
+              <small className="bsf-by"><Avatar name={author} src={portrait || brave.candidate} size={20} /><input className="bsf-author" value={authorText} onChange={(event) => setAuthorText(event.target.value)} placeholder={`${mode === "manual" ? authorType : "Author"} (optional)`} aria-label={`${mode === "manual" ? authorType : "Author"} name`} /></small>
+              {mode === "manual" && <small className="bsf-role-summary">Book credit: {authorType}</small>}
               {!!book.primaryIsbn && <small className="bsf-isbn">ISBN {book.primaryIsbn}</small>}
             </span>
           </div>
@@ -570,21 +695,31 @@ export default function BookSearchFlow({ initialTitle = "", findExisting, onSave
             </div>
           )}
           {brave.none && <p className="bsf-hint">No confident match found, so a simple avatar will be used.</p>}
-          <h3 className="bsf-sub">{fromScan ? "Read from your photos. Please check" : "Chapters"} ({chapters.length})</h3>
+          <h3 className="bsf-sub">{fromScan ? "Read from your photos. Please check" : "Review chapters"} ({chapters.length})</h3>
+          {message && <p className="bsf-msg err" role="status"><AlertTriangle size={16} />{message}</p>}
           <ul className="bsf-chapters">
-            {chapters.map((chapter, index) => (
-              <li key={index}>
-                <span className="bsf-num">{index + 1}</span>
-                <input value={chapter.title} onChange={(event) => updateChapter(index, { title: event.target.value })} aria-label={`Chapter ${index + 1} title`} />
-                <input className="bsf-page" inputMode="numeric" placeholder="Page" value={chapter.startPage ?? ""} onChange={(event) => updateChapter(index, { startPage: event.target.value.replace(/\D/g, "") ? Number(event.target.value.replace(/\D/g, "")) : null })} aria-label={`Chapter ${index + 1} start page (optional)`} />
-                <button type="button" aria-label="Remove chapter" onClick={() => removeChapter(index)}><Trash2 size={14} /></button>
-              </li>
-            ))}
+            {chapters.flatMap((chapter, index) => [
+              chapter.section && chapter.section !== chapters[index - 1]?.section
+                ? <li className="bsf-section-heading" key={`section-${index}`}>{chapter.section}</li>
+                : null,
+              <li className={`bsf-chapter-entry ${chapter.confidence === "low" ? "low-confidence" : ""}`} key={`chapter-${index}`}>
+                <div className="bsf-chapter-title-line">
+                  <span className="bsf-num">{index + 1}</span>
+                  <input value={chapter.title} onChange={(event) => updateChapter(index, { title: event.target.value })} aria-label={`Chapter ${index + 1} title`} placeholder="Chapter title" />
+                  <input className="bsf-page" inputMode="numeric" placeholder="Page" value={chapter.startPage ?? ""} onChange={(event) => updateChapter(index, { startPage: event.target.value.replace(/\D/g, "") ? Number(event.target.value.replace(/\D/g, "")) : null })} aria-label={`Chapter ${index + 1} start page (optional)`} />
+                  <button type="button" aria-label={`Move chapter ${index + 1} up`} disabled={index === 0} onClick={() => moveChapter(index, -1)}><ChevronUp size={15} /></button>
+                  <button type="button" aria-label={`Move chapter ${index + 1} down`} disabled={index === chapters.length - 1} onClick={() => moveChapter(index, 1)}><ChevronDown size={15} /></button>
+                  <button type="button" aria-label={`Remove chapter ${index + 1}`} onClick={() => removeChapter(index)}><Trash2 size={14} /></button>
+                </div>
+                <input className="bsf-chapter-author" value={chapter.author || ""} onChange={(event) => updateChapter(index, { author: event.target.value || null })} placeholder="Lesson author (optional)" aria-label={`Chapter ${index + 1} author (optional)`} />
+                {chapter.confidence === "low" && <small className="bsf-low-hint">Check this one</small>}
+              </li>,
+            ])}
           </ul>
           <button type="button" className="bsf-link" onClick={addChapter}><Plus size={14} /> Add a chapter</button>
           <div className="bsf-actions">
             <button type="button" className="icon-button ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="primary-button" disabled={!book.title.trim() || !chapters.some((chapter) => chapter.title.trim())} onClick={save}>Add to library</button>
+            <button type="button" className="primary-button" disabled={savingManual || !book.title.trim() || !chapters.some((chapter) => chapter.title.trim())} onClick={save}>{savingManual ? "Adding…" : "Add to library"}</button>
           </div>
         </div>
       )}

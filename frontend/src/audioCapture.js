@@ -19,6 +19,9 @@ export class AudioCapture {
   }
 
   async start() {
+    if (!this.stopped && this.stream) return;
+    clearInterval(this.timer);
+    if (this.onVis) document.removeEventListener("visibilitychange", this.onVis);
     this.stopped = false;
     await this._open();
     if (this.stopped) return;
@@ -49,6 +52,7 @@ export class AudioCapture {
     this.keepAliveGain.gain.value = 0;
     this.workletNode.port.onmessage = (event) => {
       this.lastChunkAt = Date.now();
+      if (this.muted) return;
       const int16 = new Int16Array(event.data);
       let sumSquares = 0;
       for (let i = 0; i < int16.length; i++) {
@@ -57,7 +61,6 @@ export class AudioCapture {
       }
       const rms = int16.length ? Math.sqrt(sumSquares / int16.length) : 0;
       this.onLevel?.(Math.min(1, rms * 8));
-      if (this.muted) return;
       const bytes = new Uint8Array(event.data);
       let binary = "";
       for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
@@ -68,8 +71,9 @@ export class AudioCapture {
     this.keepAliveGain.connect(this.audioContext.destination);
     const track = this.stream.getAudioTracks()[0];
     if (track) {
-      track.onended = () => this._restart();
+      track.onended = () => { if (!this.muted) void this._restart(); };
       track.onmute = () => {
+        if (this.muted) return;
         clearTimeout(this.muteRestartTimer);
         this.muteRestartTimer = setTimeout(() => {
           this.muteRestartTimer = null;
@@ -96,7 +100,7 @@ export class AudioCapture {
   }
 
   async _restart() {
-    if (this.stopped || this.restarting) return;
+    if (this.stopped || this.muted || this.restarting) return;
     this.restarting = true;
     try {
       console.info("[MIC] restarting");
@@ -111,16 +115,23 @@ export class AudioCapture {
   }
 
   _check() {
-    if (this.stopped || this.restarting) return;
+    if (this.stopped || this.muted || this.restarting) return;
     const ctx = this.audioContext;
     if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
     if (Date.now() - this.lastChunkAt > 2500) this._restart();
   }
 
-  setMuted(muted) { this.muted = muted; }
+  setMuted(muted) {
+    this.muted = Boolean(muted);
+    if (this.muted) {
+      clearTimeout(this.muteRestartTimer);
+      this.muteRestartTimer = null;
+    }
+  }
 
   stop() {
     this.stopped = true;
+    this.muted = true;
     clearInterval(this.timer);
     if (this.onVis) document.removeEventListener("visibilitychange", this.onVis);
     this._teardown();

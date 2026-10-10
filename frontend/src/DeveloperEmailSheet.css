@@ -1,0 +1,21 @@
+.dev-email-layer { position: fixed; inset: 0; z-index: 12000; display: flex; align-items: flex-end; justify-content: center; }
+.dev-email-scrim { position: absolute; inset: 0; border: 0; background: rgba(8, 8, 16, .68); }
+.dev-email-sheet { position: relative; width: min(100%, 430px); max-height: min(88dvh, 820px); overflow-y: auto; padding: 12px 20px calc(22px + env(safe-area-inset-bottom)); border: 1px solid var(--border); border-bottom: 0; border-radius: 22px 22px 0 0; color: var(--text); background: var(--surface); box-shadow: 0 -16px 48px rgba(0, 0, 0, .28); animation: dev-email-rise .22s ease-out both; }
+.dev-email-handle { width: 38px; height: 4px; margin: 0 auto 16px; border-radius: 4px; background: var(--muted); opacity: .45; }
+.dev-email-close { position: absolute; top: 17px; right: 16px; width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--muted); background: var(--surface-2); }
+.dev-email-eyebrow { margin: 0 48px 5px 0; color: var(--primary); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.dev-email-sheet h2 { margin: 0 45px 14px 0; font: 600 22px/1.2 "Playfair Display", serif; }
+.dev-email-sending { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.dev-email-note { margin: 5px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.dev-email-preview { max-height: 220px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.dev-email-preview p { display: grid; grid-template-columns: 55px minmax(0, 1fr); gap: 8px; margin: 0 0 8px; font-size: 12px; }
+.dev-email-preview p span { overflow-wrap: anywhere; }
+.dev-email-preview pre { margin: 10px 0 0; padding-top: 9px; border-top: 1px solid var(--border); color: var(--muted); font-family: inherit; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dev-email-fallback { margin: 10px 0 0; color: var(--primary); font-size: 12px; font-weight: 700; }
+.dev-email-actions { display: grid; gap: 8px; margin-top: 14px; }
+.dev-email-actions button, .dev-email-actions a { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface-2); font-family: inherit; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; }
+.dev-email-actions button:first-child { border-color: transparent; color: #fff; background: linear-gradient(135deg, var(--primary), var(--primary-2)); }
+.dev-email-actions button:disabled { opacity: .55; cursor: not-allowed; }
+.dev-email-platform { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 10px; color: var(--muted); font-size: 10px; }
+@keyframes dev-email-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .dev-email-sheet { animation: none; } }

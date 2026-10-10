@@ -1,53 +1,71 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { APP_VERSION } from "./version.js";
-import { buildContactEmail, CONTACT, openContactEmail } from "./developerContact.js";
+import { buildDeveloperEmail, buildDeveloperEmailLinks, CONTACT } from "./developerContact.js";
 
-test("Gmail compose links include the request context and signed reader details", () => {
-  const { gmail, mailto } = buildContactEmail({
-    subject: "Reading Companion docs access request",
-    request: "I would like access to the private technical documentation.",
-    userId: "123e4567-e89b-12d3-a456-426614174000",
-    name: "A Reader",
+test("docs-access email contains its request, reader details, and app version", () => {
+  const email = buildDeveloperEmail({
+    kind: "docs_access",
+    user: { id: "123e4567-e89b-12d3-a456-426614174000", displayName: "A Reader", email: "reader@example.com" },
+    context: { reason: "I need the API flow details." },
   });
-  const gmailUrl = new URL(gmail);
-  const mailtoUrl = new URL(mailto);
+  const urls = buildDeveloperEmailLinks(email, "reader@example.com");
+  const gmailUrl = new URL(urls.gmail);
+  const mailtoUrl = new URL(urls.mailto);
 
   assert.equal(gmailUrl.origin + gmailUrl.pathname, "https://mail.google.com/mail/");
   assert.equal(gmailUrl.searchParams.get("view"), "cm");
   assert.equal(gmailUrl.searchParams.get("fs"), "1");
   assert.equal(gmailUrl.searchParams.get("to"), CONTACT.email);
-  assert.equal(gmailUrl.searchParams.get("su"), "Reading Companion docs access request");
-  assert.match(gmailUrl.searchParams.get("body"), /Supabase user ID: 123e4567-e89b-12d3-a456-426614174000/);
-  assert.match(gmailUrl.searchParams.get("body"), /private technical documentation/);
+  assert.equal(gmailUrl.searchParams.get("authuser"), "reader@example.com");
+  assert.equal(gmailUrl.searchParams.get("su"), "[Reading Companion] Docs access request (UID 123e4567)");
+  assert.match(gmailUrl.searchParams.get("body"), /Reader UID: 123e4567-e89b-12d3-a456-426614174000/);
+  assert.match(gmailUrl.searchParams.get("body"), /Reason: I need the API flow details/);
   assert.match(gmailUrl.searchParams.get("body"), new RegExp(`App version: ${APP_VERSION}`));
-  assert.match(gmailUrl.searchParams.get("body"), /Best regards,\nA Reader\nReading Companion reader/);
   assert.equal(mailtoUrl.protocol, "mailto:");
   assert.equal(mailtoUrl.pathname, CONTACT.email);
   assert.equal(mailtoUrl.searchParams.get("subject"), gmailUrl.searchParams.get("su"));
-  assert.equal(mailtoUrl.searchParams.get("body"), gmailUrl.searchParams.get("body"));
+  assert.equal(mailtoUrl.searchParams.get("body"), gmailUrl.searchParams.get("body").replace(/\n/g, "\r\n"));
 });
 
-test("missing reader name or UID still produces a complete signed compose body", () => {
-  const { gmail } = buildContactEmail({ subject: "Limit increase", request: "Please review my limit increase request." });
-  const body = new URL(gmail).searchParams.get("body");
-
-  assert.match(body, /Supabase user ID: Unavailable/);
-  assert.match(body, /Best regards,\nReader\nReading Companion reader/);
+test("limit email includes quota, device, browser, local time, and signature", () => {
+  const email = buildDeveloperEmail({
+    kind: "limit_increase",
+    user: { id: "123e4567-e89b-12d3-a456-426614174000", name: "Reader" },
+    context: { dailyLimitMinutes: 30, minutesUsedToday: 29.5, device: "Android", browser: "Chrome", localTime: "10 Oct 2026, 8:00 AM" },
+  });
+  assert.equal(email.subject, "[Reading Companion] Reading limit increase request (UID 123e4567)");
+  assert.match(email.body, /Current daily limit: 30 minutes/);
+  assert.match(email.body, /Minutes used today: 29.5/);
+  assert.match(email.body, /Device: Android/);
+  assert.match(email.body, /Browser: Chrome/);
+  assert.match(email.body, /Local time: 10 Oct 2026, 8:00 AM/);
+  assert.match(email.body, /Best regards,\nReader\nReading Companion reader/);
 });
 
-test("blocked Gmail compose falls back to the matching mailto URL", () => {
-  const originalWindow = globalThis.window;
-  let fallbackUrl = "";
-  globalThis.window = { open: () => null, location: { assign: (url) => { fallbackUrl = url; } } };
+test("Unicode names and special characters are encoded in compose URLs", () => {
+  const email = buildDeveloperEmail({ kind: "docs_access", user: { id: "reader-1", name: "रीना 📚" }, context: { reason: "नमस्ते & help" } });
+  const urls = buildDeveloperEmailLinks(email, "reader+books@example.com");
+  assert.match(new URL(urls.gmail).searchParams.get("body"), /रीना 📚/);
+  assert.match(new URL(urls.gmail).searchParams.get("body"), /नमस्ते & help/);
+  assert.match(urls.mailto, /%0D%0A/);
+  assert.match(urls.gmailApp, /package=com\.google\.android\.gm/);
+});
 
-  try {
-    assert.equal(openContactEmail({ subject: "Limit increase", request: "Please review my request.", userId: "reader-id" }), "mailto");
-    assert.match(fallbackUrl, /^mailto:/);
-    assert.equal(new URL(fallbackUrl).searchParams.get("subject"), "Limit increase");
-    assert.match(new URL(fallbackUrl).searchParams.get("body"), /Supabase user ID: reader-id/);
-  } finally {
-    if (originalWindow === undefined) delete globalThis.window;
-    else globalThis.window = originalWindow;
-  }
+test("missing optional fields never produce undefined and missing UID is explicit", () => {
+  const email = buildDeveloperEmail({ kind: "docs_access" });
+  assert.match(email.body, /Reader UID: Unavailable/);
+  assert.doesNotMatch(`${email.subject}\n${email.body}`, /undefined/i);
+});
+
+test("long names and optional context keep compose URLs under the safe limit", () => {
+  const email = buildDeveloperEmail({
+    kind: "limit_increase",
+    user: { id: "123e4567-e89b-12d3-a456-426614174000", name: "📖".repeat(150), email: "reader@example.com" },
+    context: { dailyLimitMinutes: 30, minutesUsedToday: 30, device: "Android".repeat(50), browser: "Chrome".repeat(50), localTime: "today".repeat(100) },
+  });
+  const urls = buildDeveloperEmailLinks(email, "reader@example.com");
+  assert.ok(urls.gmail.length <= 1800);
+  assert.ok(urls.mailto.length <= 1800);
+  assert.match(email.body, /Reader UID: 123e4567-e89b-12d3-a456-426614174000/);
 });

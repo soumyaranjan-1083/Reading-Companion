@@ -430,11 +430,67 @@ export function parseVisionChapters(text) {
   return out;
 }
 
+function looksLikePersonName(value) {
+  const words = String(value || "").trim().split(/\s+/u);
+  return words.length >= 2 && words.length <= 5 && words.every((word) => /^[\p{Lu}][\p{L}'’.\-]*$/u.test(word));
+}
+
+export function parseVisionContents(text) {
+  let data;
+  try {
+    data = JSON.parse(String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+  } catch {
+    return { error: "malformed" };
+  }
+  if (data?.error === "unreadable" || data?.error === "not_contents_page") return { error: data.error };
+  if (!data || !Array.isArray(data.chapters) || !data.chapters.length) return { error: "malformed" };
+  const rows = data.chapters.slice(0, MAX_CHAPTERS);
+  if (rows.some((entry) => !entry || typeof entry !== "object" ||
+      typeof entry.title !== "string" || !entry.title.trim() || entry.title.length > 160 ||
+      !(entry.section === null || typeof entry.section === "string") ||
+      !(entry.author === null || typeof entry.author === "string") ||
+      !(entry.startPage === null || (Number.isInteger(entry.startPage) && entry.startPage > 0)) ||
+      !["high", "medium", "low"].includes(entry.confidence))) return { error: "malformed" };
+
+  const repeatedTitles = new Map();
+  for (const entry of rows) {
+    const key = norm(entry.title);
+    repeatedTitles.set(key, (repeatedTitles.get(key) || 0) + 1);
+  }
+  const chapters = rows.map((entry, index) => {
+    const title = cleanChapterTitle(entry.title);
+    const author = entry.author?.trim() || null;
+    const repeats = (repeatedTitles.get(norm(title)) || 0) > 1;
+    const titleLooksLikeAuthor = Boolean(author && norm(title) === norm(author));
+    const suspiciousName = looksLikePersonName(title) && (titleLooksLikeAuthor || repeats);
+    return {
+      number: index + 1,
+      section: entry.section?.trim() || null,
+      title,
+      author,
+      startPage: entry.startPage,
+      confidence: suspiciousName ? "low" : entry.confidence,
+    };
+  });
+  return { chapters };
+}
+
+export async function parseVisionContentsWithRetry(request) {
+  let parsed = { error: "malformed" };
+  for (let attempt = 0; attempt < 2 && parsed.error === "malformed"; attempt += 1) {
+    parsed = parseVisionContents(await request(attempt));
+  }
+  return parsed.error === "malformed" ? { error: "unreadable", reason: "schema_mismatch" } : parsed;
+}
+
 export const TOC_VISION_PROMPT =
-  "These photos show the contents (table of contents) page(s) of ONE book. Read them together and list the chapters exactly as printed, in order. " +
-  "Rules: copy only what is visible; never invent, translate, summarise or guess chapters; skip front matter such as copyright, dedication or acknowledgements; " +
-  "if a page number is not visible leave it null; ignore handwriting and unrelated text. " +
-  'Return JSON only: {"chapters":[{"title":string,"page":number|null}]}. If no table of contents is readable return {"chapters":[]}.'; 
+  "These photos show one or more contents pages from ONE book. Read all photos together in page order. Return each lesson or chapter as one entry. " +
+  "The title is ALWAYS the lesson or chapter title. Never use a person's name as the title; put a name printed next to a lesson in author. " +
+  "Group headings such as Prose, Poetry, Drama, Unit 2, Section A, or a subject are section labels, not chapters. " +
+  "Ignore handwriting, underlines, doodles, ticks, margin notes, and phone UI. If handwriting obscures a printed entry, keep the visible entry only when possible and set confidence low; never guess a title or page. " +
+  "Handle multiple columns, dotted leaders, Roman-numeral front matter, and numbering that restarts by unit. Skip front matter that is not a lesson. Preserve the printed script exactly; do not translate or transliterate. " +
+  "If this is not a contents page return {\"error\":\"not_contents_page\"}. If it is too blurry, cropped, or unreadable return {\"error\":\"unreadable\"}. " +
+  'Otherwise return JSON only: {"chapters":[{"section":string|null,"title":string,"author":string|null,"startPage":number|null,"confidence":"high"|"medium"|"low"}]}.';
 
 export function validateImages(images, { maxCount = 6, maxBytesEach = 1_800_000 } = {}) {
   if (!Array.isArray(images) || !images.length || images.length > maxCount) return null;

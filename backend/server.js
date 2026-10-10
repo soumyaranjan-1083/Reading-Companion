@@ -5,12 +5,12 @@ import express from "express";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchAuthorBio, fetchBookDetails, findBooks, fetchTocByIsbn, parseVisionChapters, validateImages, TOC_VISION_PROMPT } from "./bookLookup.js";
+import { fetchAuthorBio, fetchBookDetails, findBooks, fetchTocByIsbn, parseVisionContentsWithRetry, validateImages, TOC_VISION_PROMPT } from "./bookLookup.js";
 import { getAiProviderOrder, readTextCompletion, requestTextCompletion, streamTextCompletion } from "./aiTextProviders.js";
 import { normalizeGemEchoCatalog, validateGemEchoCandidates, validateGemEchoPairs } from "./gemEchoes.js";
 import { classifyGeminiFailure, KeyPool } from "./geminiKeyPool.js";
 import { verifyDocsOwner, loadDocsBundle } from "./docsAccess.js";
-import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, normalizeArenaAvatarUrl, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
+import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, normalizeArenaAvatarUrl, parseAdminUserIds, quotaResponse, readerRankingResponse, buildArenaRankingSets } from "./readingQuota.js";
 import { parsePageVerification } from "./pageVerification.js";
 import { registerDocsNarration } from "./docsNarration.js";
 import { buildChunks, retrieve, buildMessages, pickCited } from "./docsHelper.js";
@@ -1447,12 +1447,20 @@ async function createArenaAvatarUrl(path) {
     const userId = await getAuthenticatedQuotaUser(req, res);
     if (!userId) return;
     try {
-      const rows = await callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: period }, true);
-      const withAvatars = await Promise.all(rows.map(async (row) => ({
+      const [weeklyRows, allTimeRows] = await Promise.all([
+        callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: "weekly" }, true),
+        callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: "all_time" }, true),
+      ]);
+      const withAvatars = await Promise.all(allTimeRows.map(async (row) => ({
         ...row,
         avatar_url: row.arena_show_photo === true ? await createArenaAvatarUrl(row.arena_avatar_path) : null,
       })));
-      return res.json({ rankings: readerRankingResponse(withAvatars, userId, SUPABASE_URL) });
+      const sets = buildArenaRankingSets(withAvatars, weeklyRows);
+      return res.json({
+        rankings: readerRankingResponse(period === "weekly" ? sets.weekly : sets.allTime, userId, SUPABASE_URL),
+        weeklyRankings: readerRankingResponse(sets.weekly, userId, SUPABASE_URL),
+        allTimeRankings: readerRankingResponse(sets.allTime, userId, SUPABASE_URL),
+      });
     } catch (error) {
       console.error("[READING_RANKINGS] fetch failed:", redactSecrets(error?.message || error, 160));
       return res.status(503).json({ error: "reader_rankings_unavailable" });
@@ -2140,8 +2148,9 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function scanTocWithGemini(images) {
-  const parts = [{ text: TOC_VISION_PROMPT }, ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } }))];
+async function scanTocWithGemini(images, retry = false) {
+  const prompt = retry ? `${TOC_VISION_PROMPT} Your previous response did not match this exact schema. Return only valid JSON that matches it.` : TOC_VISION_PROMPT;
+  const parts = [{ text: prompt }, ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.data } }))];
   const response = await withTimeout(generateGeminiContent({
     model: TOC_SCAN_MODEL,
     contents: [{ role: "user", parts }],
@@ -2150,7 +2159,7 @@ async function scanTocWithGemini(images) {
   return response.text;
 }
 
-async function scanTocWithOpenRouter(images) {
+async function scanTocWithOpenRouter(images, retry = false) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TOC_SCAN_TIMEOUT_MS);
   try {
@@ -2162,7 +2171,7 @@ async function scanTocWithOpenRouter(images) {
         model: OPENROUTER_VISION_MODEL,
         temperature: 0,
         max_tokens: 2500,
-        messages: [{ role: "user", content: [{ type: "text", text: TOC_VISION_PROMPT }, ...images.map((img) => ({ type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.data}` } }))] }],
+        messages: [{ role: "user", content: [{ type: "text", text: retry ? `${TOC_VISION_PROMPT} Your previous response did not match this exact schema. Return only valid JSON that matches it.` : TOC_VISION_PROMPT }, ...images.map((img) => ({ type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.data}` } }))] }],
       }),
     });
     if (!r.ok) throw new Error(`openrouter_http_${r.status}`);
@@ -2178,18 +2187,20 @@ app.post("/api/book-lookup/toc-scan", async (req, res) => {
   if (!images) return res.status(400).json({ error: "invalid_images" });
   if (!allowAiRequestForResponse(req, res, "tocScan")) return undefined;
   try {
-    let text = "";
     let via = "gemini";
-    try {
-      text = await scanTocWithGemini(images);
-    } catch (error) {
-      console.warn("[TOC SCAN] gemini failed:", redactSecrets(error?.message, 140));
-      if (!OPENROUTER_API_KEY) throw error;
-      via = "openrouter";
-      text = await scanTocWithOpenRouter(images);
-    }
-    console.info(`[TOC SCAN] ${via} ok`);
-    return res.json({ chapters: parseVisionChapters(text) });
+    const parsed = await parseVisionContentsWithRetry(async (attempt) => {
+      try {
+        via = "gemini";
+        return await scanTocWithGemini(images, attempt > 0);
+      } catch (error) {
+        console.warn("[TOC SCAN] gemini failed:", redactSecrets(error?.message, 140));
+        if (!OPENROUTER_API_KEY) throw error;
+        via = "openrouter";
+        return scanTocWithOpenRouter(images, attempt > 0);
+      }
+    });
+    console.info(`[TOC SCAN] ${via} ${parsed.error ? "response rejected" : "ok"}`);
+    return res.json(parsed);
   } catch (error) {
     console.warn("[TOC SCAN] failed:", redactSecrets(error?.message, 140));
     refundAiRequest("tocScan", req.ip || req.socket.remoteAddress || "unknown");

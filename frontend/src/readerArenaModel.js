@@ -37,6 +37,52 @@ export function getArenaRosterLayout(readers) {
   };
 }
 
+export function buildWeeklyArenaData(readers) {
+  const raced = readers.filter((reader) => Number(reader.weeklySeconds ?? (reader.rank == null ? 0 : reader.totalSeconds)) > 0)
+    .map((reader) => ({ ...reader, totalSeconds: Number(reader.weeklySeconds ?? reader.totalSeconds), rank: reader.weeklyRank ?? reader.rank }));
+  const notStarted = readers.filter((reader) => Number(reader.weeklySeconds ?? (reader.rank == null ? 0 : reader.totalSeconds)) <= 0)
+    .map((reader) => ({ ...reader, totalSeconds: 0, rank: null }))
+    .sort((left, right) => Number(left.allTimeRank || Number.MAX_SAFE_INTEGER) - Number(right.allTimeRank || Number.MAX_SAFE_INTEGER)
+      || String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
+  return { raced, notStarted, racedCount: raced.length };
+}
+
+export function getArenaGapText(reader, leader, runnerUp) {
+  if (!reader || !leader) return "";
+  if (reader.rank === 1) {
+    if (!runnerUp) return "Leading the race";
+    const seconds = Math.max(0, reader.totalSeconds - runnerUp.totalSeconds);
+    return seconds ? `+${formatDuration(seconds)} ahead` : "Tied for #1";
+  }
+  return `${formatDuration(Math.max(0, leader.totalSeconds - reader.totalSeconds))} behind #1`;
+}
+
+export function buildArenaProfile(reader, viewer, period = "weekly") {
+  if (!reader) return null;
+  const weeklySeconds = Number(reader.weeklySeconds ?? (period === "weekly" ? reader.totalSeconds : 0)) || 0;
+  const allTimeSeconds = Number(reader.allTimeSeconds ?? (period === "all_time" ? reader.totalSeconds : 0)) || 0;
+  const weeklyRank = reader.weeklyRank ?? (period === "weekly" ? reader.rank : null);
+  const allTimeRank = reader.allTimeRank ?? (period === "all_time" ? reader.rank : null);
+  let comparison = "";
+  if (viewer && !reader.isYou) {
+    const left = period === "weekly" ? Number(viewer.weeklySeconds || 0) : Number(viewer.allTimeSeconds || 0);
+    const right = period === "weekly" ? weeklySeconds : allTimeSeconds;
+    const lead = Math.abs(left - right);
+    if (lead === 0) comparison = `You and ${reader.name} are tied`;
+    else if (left > right) comparison = `You are ${formatDuration(lead)} ahead of ${reader.name}`;
+    else comparison = `${reader.name} is ${formatDuration(lead)} ahead of you`;
+  }
+  return {
+    name: String(reader.name || "Reader"),
+    avatarUrl: reader.avatarUrl || null,
+    weeklyRank,
+    allTimeRank,
+    weeklySeconds,
+    allTimeSeconds,
+    comparison,
+  };
+}
+
 export function getArenaPlaceMessage(rankings, reader) {
   if (!reader) return "Join the race";
   if (reader.rank === 1) {
@@ -52,6 +98,7 @@ export function getArenaPlaceMessage(rankings, reader) {
 }
 
 export function readerAccessibleLabel(reader) {
+  if (reader.rank == null) return `${reader.name}, has not started this week, ${formatDuration(reader.totalSeconds)}`;
   return `Rank ${reader.rank}, ${reader.name}, ${formatDuration(reader.totalSeconds)}${reader.isYou ? ", you" : ""}`;
 }
 
@@ -64,7 +111,7 @@ export function getTieMark(readers, reader) {
 }
 
 export function getArenaRowClassName(reader) {
-  return `arena-row${reader.rank <= 10 ? " top-ten" : ""}${reader.isYou ? " is-you" : ""}`;
+  return `arena-row${reader.rank != null && reader.rank <= 10 ? " top-ten" : ""}${reader.isYou ? " is-you" : ""}`;
 }
 
 export function getArenaMotionSettings(reduceMotion) {
