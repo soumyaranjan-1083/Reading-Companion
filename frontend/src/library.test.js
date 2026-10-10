@@ -98,3 +98,18 @@ test("chapter end pages are inferred from the next known chapter start only", ()
   assert.equal(library.getChapter(book.id, 2).endPage, 44);
   assert.equal(library.getChapter(book.id, 3).endPage, null);
 });
+
+test("textbook chapter sections, lesson authors, confidence, and book author role persist locally", () => {
+  const library = new Library();
+  const book = library.getOrCreateBook("Textbook");
+  library.updateBookMeta(book.id, { authorType: "Publisher", authorName: "Learning House" });
+  library.setChapterOutline(book.id, [{
+    chapterNumber: 1, title: "The Last Leaf", section: "Prose", author: "O. Henry", startPage: 11, confidence: "low",
+  }]);
+  const saved = library.getBook(book.id);
+  assert.equal(saved.authorType, "Publisher");
+  assert.equal(saved.chapters[1].section, "Prose");
+  assert.equal(saved.chapters[1].author, "O. Henry");
+  assert.equal(saved.chapters[1].confidence, "low");
+  assert.equal(saved.chapters[1].startPage, 11);
+});

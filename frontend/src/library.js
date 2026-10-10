@@ -33,6 +33,9 @@ function emptyChapter(number) {
   return {
     number,
     title: `Chapter ${number}`,
+    section: null,
+    author: null,
+    confidence: null,
     summary: "",
     status: "",
     vocabLog: [],
@@ -127,6 +130,7 @@ function normalize(book) {
     coverUrl: book.coverUrl || "",
     isbn: book.isbn || "",
     authorName: book.authorName || "",
+    authorType: ["Author", "Editor", "Publisher", "Multiple authors"].includes(book.authorType) ? book.authorType : "Author",
     authorBio: book.authorBio || "",
     authorPortrait: book.authorPortrait || "",
     authorPortraits: Array.isArray(book.authorPortraits) ? book.authorPortraits : [],
@@ -201,7 +205,7 @@ export class Library {
     this._save();
     return book;
   }
-  updateBookMeta(id, { displayTitle, coverImage, coverUrl, isbn, authorName, authorBio, authorPortrait, authorPortraits } = {}) {
+  updateBookMeta(id, { displayTitle, coverImage, coverUrl, isbn, authorName, authorType, authorBio, authorPortrait, authorPortraits } = {}) {
     const raw = this.data.books[id];
     if (!raw) return;
     const book = normalize(raw);
@@ -210,6 +214,7 @@ export class Library {
     if (typeof coverUrl === "string") book.coverUrl = coverUrl;
     if (typeof isbn === "string") book.isbn = isbn.trim();
     if (typeof authorName === "string") book.authorName = authorName.trim();
+    if (["Author", "Editor", "Publisher", "Multiple authors"].includes(authorType)) book.authorType = authorType;
     if (typeof authorBio === "string") book.authorBio = authorBio.trim();
     if (typeof authorPortrait === "string") book.authorPortrait = authorPortrait;
     if (Array.isArray(authorPortraits)) book.authorPortraits = authorPortraits;
@@ -441,6 +446,9 @@ export class Library {
       if (!book.chapters[n]) book.chapters[n] = emptyChapter(n);
       const ch = book.chapters[n];
       if (typeof item.title === "string" && item.title.trim()) ch.title = item.title.trim();
+      if (typeof item.section === "string" || item.section === null) ch.section = item.section?.trim() || null;
+      if (typeof item.author === "string" || item.author === null) ch.author = item.author?.trim() || null;
+      if (["high", "medium", "low"].includes(item.confidence)) ch.confidence = item.confidence;
       const s = Number(item.startPage), e = Number(item.endPage);
       if (Number.isFinite(s) && s > 0) ch.startPage = s;
       if (Number.isFinite(e) && e > 0 && (!Number.isFinite(s) || e >= s)) ch.endPage = e;

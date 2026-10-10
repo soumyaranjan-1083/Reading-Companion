@@ -7,6 +7,8 @@ import {
   findBooks,
   fetchTocByIsbn,
   normalizeToc,
+  parseVisionContents,
+  parseVisionContentsWithRetry,
   parseVisionChapters,
   validateImages,
 } from "./bookLookup.js";
@@ -152,6 +154,61 @@ test("a single-entry table of contents is not trusted", async () => {
 test("vision output never gains chapters and bad input is empty", () => {
   assert.equal(parseVisionChapters("not json").length, 0);
   assert.deepEqual(parseVisionChapters('{"chapters":[{"title":"A","page":1},{"title":"a"},{"title":"B","page":null}]}').map((chapter) => chapter.title), ["A", "B"]);
+});
+
+test("strict contents schema preserves self-help titles, pages, and nullable fields", () => {
+  const parsed = parseVisionContents(JSON.stringify({ chapters: [
+    { section: null, title: "Start with Why", author: null, startPage: 3, confidence: "high" },
+    { section: null, title: "Find Your Why", author: null, startPage: null, confidence: "medium" },
+  ] }));
+  assert.equal(parsed.error, undefined);
+  assert.deepEqual(parsed.chapters.map(({ title, startPage, author }) => [title, startPage, author]), [
+    ["Start with Why", 3, null], ["Find Your Why", null, null],
+  ]);
+});
+
+test("textbook sections and lesson authors stay separate from chapter titles", () => {
+  const parsed = parseVisionContents(JSON.stringify({ chapters: [
+    { section: "Prose", title: "The Last Leaf", author: "O. Henry", startPage: 11, confidence: "high" },
+    { section: "Poetry", title: "Daffodils", author: "William Wordsworth", startPage: 29, confidence: "high" },
+  ] }));
+  assert.deepEqual(parsed.chapters.map(({ section, title, author }) => [section, title, author]), [
+    ["Prose", "The Last Leaf", "O. Henry"], ["Poetry", "Daffodils", "William Wordsworth"],
+  ]);
+});
+
+test("messy and person-name-looking rows are flagged low without editing their titles", () => {
+  const parsed = parseVisionContents(JSON.stringify({ chapters: [
+    { section: "Prose", title: "O. Henry", author: "O. Henry", startPage: 11, confidence: "high" },
+    { section: "Poetry", title: "Daffodils", author: null, startPage: null, confidence: "low" },
+  ] }));
+  assert.equal(parsed.chapters[0].title, "O. Henry");
+  assert.equal(parsed.chapters[0].confidence, "low");
+  assert.equal(parsed.chapters[1].confidence, "low");
+});
+
+test("unreadable and non-contents model results remain explicit", () => {
+  assert.deepEqual(parseVisionContents('{"error":"unreadable"}'), { error: "unreadable" });
+  assert.deepEqual(parseVisionContents('{"error":"not_contents_page"}'), { error: "not_contents_page" });
+});
+
+test("malformed vision schemas are rejected instead of silently dropping rows", () => {
+  assert.deepEqual(parseVisionContents("not JSON"), { error: "malformed" });
+  assert.deepEqual(parseVisionContents('{"chapters":[{"title":"Bad row","page":"?"}]}'), { error: "malformed" });
+});
+
+test("malformed contents output retries once, then safely falls back", async () => {
+  let calls = 0;
+  const result = await parseVisionContentsWithRetry(async () => { calls += 1; return "not JSON"; });
+  assert.equal(calls, 2);
+  assert.deepEqual(result, { error: "unreadable", reason: "schema_mismatch" });
+});
+
+test("explicit unreadable output is not retried", async () => {
+  let calls = 0;
+  const result = await parseVisionContentsWithRetry(async () => { calls += 1; return '{"error":"unreadable"}'; });
+  assert.equal(calls, 1);
+  assert.deepEqual(result, { error: "unreadable" });
 });
 
 test("image validation", () => {

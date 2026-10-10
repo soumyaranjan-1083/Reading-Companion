@@ -703,12 +703,6 @@ function AppCore() {
   function closeStory() {
     setStoryRequest(null);
   }
-  function createBookAndOpenSession(title) {
-    const book = library.getOrCreateBook(title);
-    setNewBookModalOpen(false);
-    navigateTo("session", { activeBookId: book.id });
-  }
-
   function findExistingBook(title) {
     const wanted = title.trim().toLowerCase();
     return library.listBooks().find((b) => b.title.trim().toLowerCase() === wanted) || null;
@@ -725,7 +719,10 @@ function AppCore() {
       coverUrl: coverUrl || "",
       ...(small ? { authorPortrait: small, authorPortraits: [{ name: authors[0] || authorName, dataUrl: small, sourceUrl: null }] } : {}),
     });
-    library.setChapterOutline(book.id, chapters.map((c) => ({ chapterNumber: c.number, title: c.title, startPage: c.startPage })));
+    library.setChapterOutline(book.id, chapters.map((chapter) => ({
+      chapterNumber: chapter.number, title: chapter.title, startPage: chapter.startPage,
+      section: chapter.section, author: chapter.author, confidence: chapter.confidence,
+    })));
     setNewBookModalOpen(false);
     notify(`"${title}" added with ${chapters.length} chapters.`, "success");
     if (screen !== "library") navigateTo("library");
@@ -745,6 +742,23 @@ function AppCore() {
         // portrait stays optional; the author can add one from the Library
       }
     }
+  }
+  async function createManualBook({ title, authorName, authorType, authorBio, portrait, chapters }) {
+    const book = library.getOrCreateBook(title);
+    const small = portrait ? await shrinkDataUrl(portrait) : "";
+    library.updateBookMeta(book.id, {
+      authorName: authorName || "",
+      authorType,
+      authorBio: authorBio || "",
+      ...(small ? { authorPortrait: small, authorPortraits: [{ name: authorName || "", dataUrl: small, sourceUrl: null }] } : {}),
+    });
+    library.setChapterOutline(book.id, chapters.map((chapter) => ({
+      chapterNumber: chapter.number, title: chapter.title, startPage: chapter.startPage,
+      section: chapter.section, author: chapter.author, confidence: chapter.confidence,
+    })));
+    setNewBookModalOpen(false);
+    notify(`"${title}" added with ${chapters.length} chapters.`, "success");
+    if (screen !== "library") navigateTo("library");
   }
   function goBack() {
     popRoute();
@@ -832,7 +846,7 @@ function AppCore() {
           onClose={() => setRecapModal(null)}
         />
       )}
-      {newBookModalOpen && <NewBookModal onCreate={createBookAndOpenSession} onCreateFromSearch={createBookFromSearch} findExisting={findExistingBook} onClose={() => setNewBookModalOpen(false)} />}
+      {newBookModalOpen && <NewBookModal onCreateManual={createManualBook} onCreateFromSearch={createBookFromSearch} findExisting={findExistingBook} onClose={() => setNewBookModalOpen(false)} />}
       <UpdateManager
         paused={screen === "session" || showOnboarding}
         onUpdateState={setUpdateState}
@@ -1095,10 +1109,9 @@ function BottomNav({ active, onNavigate, badges = {} }) {
 
 // ==================== NEW BOOK MODAL ====================
 
-function NewBookModal({ onCreate, onCreateFromSearch, findExisting, onClose }) {
+function NewBookModal({ onCreateManual, onCreateFromSearch, findExisting, onClose }) {
   const [view, setView] = useState("choose");
   const [title, setTitle] = useState("");
-  const mascot = useMascotPreference();
 
   function toManual(prefill, reason) {
     if (prefill) setTitle(prefill);
@@ -1129,21 +1142,7 @@ function NewBookModal({ onCreate, onCreateFromSearch, findExisting, onClose }) {
           <BookSearchFlow initialTitle={title} findExisting={findExisting} onSave={onCreateFromSearch} onManual={toManual} onClose={onClose} />
         )}
         {view === "manual" && (
-          <>
-            <div className="new-book-hero">
-              <MascotCharacter characterId={mascot} size={120} animated context="reader is about to start a new book" bubblePosition="above"/>
-            </div>
-            <h2>Start a new book</h2>
-            <input
-              autoFocus className="title-input" placeholder="Book title..."
-              value={title} onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && title.trim() && onCreate(title)}
-            />
-            <div className="modal-actions">
-              <button className="icon-button ghost" onClick={() => setView("choose")}>Back</button>
-              <button className="primary-button" disabled={!title.trim()} onClick={() => onCreate(title)}>Start</button>
-            </div>
-          </>
+          <BookSearchFlow mode="manual" initialTitle={title} findExisting={findExisting} onManualSave={onCreateManual} onClose={onClose} />
         )}
       </Motion.div>
     </Motion.div>
@@ -3716,9 +3715,9 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     setIsGhostMode(next);
     setGhostToast(next);
     triggerSuccess();
-    const author = book?.authorName || "the author of this book";
+    const author = book?.authorType === "Author" && book.authorName?.trim() ? book.authorName.trim() : "the book's known themes";
     clientRef.current?.sendQuietNote(next
-      ? `[SYSTEM NOTE] Author's Ghost Mode is ON. Do not reply to this note - stay completely silent now. From the reader's next question, let explanations draw on ${author}'s known themes and broad literary perspective while remaining the reader's companion. This is imaginative mode: do not claim to literally be the author, invent personal memories, or fabricate quotations. Keep responses grounded in the actual book and speak naturally in Hinglish.`
+      ? `[SYSTEM NOTE] Author's Ghost Mode is ON. Do not reply to this note - stay completely silent now. From the reader's next question, let explanations draw on ${author}'s broad literary perspective while remaining the reader's companion. This is imaginative mode: do not claim to literally be the author, invent personal memories, or fabricate quotations. Keep responses grounded in the actual book and speak naturally in Hinglish.`
       : "[SYSTEM NOTE] Author's Ghost Mode is OFF. Do not reply to this note - stay completely silent now. From the reader's next question, return to your usual warm reading-companion voice and answer plainly in Hinglish.");
   }
 
@@ -4191,9 +4190,13 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       ? ` Currently known to start at page ${currentChapter.startPage}${currentChapter.endPage ? `, ended at page ${currentChapter.endPage}` : ""}.`
       : "";
     const knownChapters = library.getChapters(bookId).filter((chapter) => !chapter.isPlaceholder).length;
-    const authorLine = latestBook?.authorName
-      ? ` Reader note: Author ${latestBook.authorName}. ${latestBook.authorBio ? `Brief context: ${latestBook.authorBio}` : "The author bio is not saved yet: do NOT ask the reader for it. If you are sure of it from your own knowledge, quietly call set_book_author with the full name and a short bio, otherwise say nothing."} This book was set up by the app, so NEVER ask the reader for the author's details${knownChapters > 1 ? " or for the table of contents (the chapter list is already saved)" : ""}.`
-      : " Author details for this book are not saved yet because the reader added it manually - ask the reader early in this session, then call set_book_author with what you learn.";
+    const bookCreditName = latestBook?.authorName?.trim();
+    const bookCreditType = latestBook?.authorType || "Author";
+    const authorLine = bookCreditName && bookCreditType === "Author"
+      ? ` Reader note: Author ${bookCreditName}. ${latestBook.authorBio ? `Brief context: ${latestBook.authorBio}` : "The author bio is not saved yet: do NOT ask the reader for it. If you are sure of it from your own knowledge, quietly call set_book_author with the full name and a short bio, otherwise say nothing."} This book was set up by the app, so NEVER ask the reader for the author's details${knownChapters > 1 ? " or for the table of contents (the chapter list is already saved)" : ""}.`
+      : bookCreditName
+        ? ` Reader note: The saved book credit is ${bookCreditType === "Multiple authors" ? "contributors" : bookCreditType.toLowerCase()} ${bookCreditName}. Do not relabel it as a single author or ask the reader to repeat the credit.`
+        : " No book-level author credit was provided. Do not ask the reader to repeat onboarding; answer from the saved chapter and visible page context without inventing an author.";
     const timeGapText = latestBook && latestBook.sessionCount > 0 ? describeTimeGap(latestBook.lastReadAt) : null;
     const timingLine = timeGapText
       ? ` The reader last opened this book ${timeGapText}.`

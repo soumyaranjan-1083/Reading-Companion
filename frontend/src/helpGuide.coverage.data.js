@@ -66,8 +66,8 @@ export const HELP_FEATURE_MANIFEST = [
   {
     name: "manual add book modal",
     entryId: "add-book",
-    files: ["App.jsx"],
-    includes: ["Add a book", "Add manually", "Start a new book", "Start"],
+    files: ["App.jsx", "components/BookSearchFlow.jsx"],
+    includes: ["Add a book", "Add manually", "mode=\"manual\"", "Who wrote this book?", "Upload the book&apos;s contents page", "Skip, I&apos;ll add chapters manually", "Review chapters"],
   },
   {
     name: "search a book flow",
