@@ -1,52 +1,39 @@
 import { AnimatePresence, LayoutGroup, MotionConfig, animate as animateMotion, motion as Motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
-import { ChevronLeft, Clock3, Crown, Medal, RefreshCw, Sparkles, TrendingUp, WifiOff, X } from "lucide-react";
+import { ChevronLeft, Clock3, Crown, Medal, RefreshCw, Share2, Sparkles, TrendingUp, WifiOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useBackLayer } from "./backStack.js";
 import { fetchReaderRankings } from "./readingQuota.js";
 import { formatWeekCountdown } from "./readerArenaTime.js";
+import { formatDuration, getArenaAvatarUrl, getArenaMotionSettings, getArenaPlaceMessage, getArenaRosterLayout, getArenaRowClassName, getTieMark, initials, readerAccessibleLabel, stableReaderKeys } from "./readerArenaModel.js";
 import { useHaptic } from "./useHaptic.js";
 import "./ReaderArena.css";
 
-const BURST_PARTICLES = [
-  [-42, -30], [-27, -48], [-8, -55], [17, -48], [39, -36], [53, -12], [43, 14], [27, 34], [5, 49], [-18, 43], [-39, 24], [-53, 2],
-];
-
-function formatDuration(seconds) {
-  const totalMinutes = Math.floor(seconds / 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours) return `${hours}h${minutes ? ` ${minutes}m` : ""}`;
-  return totalMinutes ? `${totalMinutes}m` : `${seconds}s`;
-}
-
-function initials(name) {
-  const words = String(name || "Reader").trim().split(/\s+/).filter(Boolean);
-  return (words.length > 1 ? `${words[0][0]}${words.at(-1)[0]}` : words[0]?.slice(0, 2) || "R").toLocaleUpperCase();
-}
-
-function stableReaderKeys(readers) {
-  const counts = new Map();
-  return readers.map((reader) => {
-    const base = reader.isYou ? "you" : String(reader.name || "Reader").toLocaleLowerCase();
-    const index = counts.get(base) || 0;
-    counts.set(base, index + 1);
-    return { ...reader, key: `${base}-${index}` };
-  });
-}
-
-function CountUp({ value, delay = 0, paused = false }) {
-  const motionValue = useMotionValue(paused ? value : 0);
+function CountUp({ value, delay = 0, paused = false, reduceMotion = false }) {
+  const motionValue = useMotionValue(paused || reduceMotion ? value : 0);
   const formatted = useTransform(motionValue, (current) => formatDuration(Math.round(current)));
   useEffect(() => {
-    if (paused) {
+    if (paused || reduceMotion) {
       motionValue.set(value);
       return undefined;
     }
     motionValue.set(0);
-    const controls = animateMotion(motionValue, value, { duration: 1.15, delay, ease: [0.17, 0.67, 0.3, 1] });
+    const controls = animateMotion(motionValue, value, { duration: 0.58, delay, ease: [0.17, 0.67, 0.3, 1] });
     return () => controls.stop();
-  }, [delay, motionValue, paused, value]);
+  }, [delay, motionValue, paused, reduceMotion, value]);
   return <Motion.span>{formatted}</Motion.span>;
+}
+
+function ReaderAvatar({ reader, size = "row" }) {
+  const [failedUrl, setFailedUrl] = useState("");
+  const avatarUrl = getArenaAvatarUrl(reader, failedUrl);
+  const hasPhoto = Boolean(avatarUrl);
+  return (
+    <span className={`arena-avatar arena-avatar-${size}${reader.rank === 1 ? " winner" : ""}`} role="img" aria-label={`${reader.name} profile photo${hasPhoto ? "" : " initials"}`}>
+      {hasPhoto
+        ? <img src={avatarUrl} alt="" loading={size === "row" ? "lazy" : "eager"} decoding="async" onError={() => setFailedUrl(avatarUrl)} />
+        : <span>{initials(reader.name)}</span>}
+    </span>
+  );
 }
 
 function useArenaClock() {
@@ -70,70 +57,69 @@ function useArenaClock() {
 }
 
 function TiesLabel({ reader, readers }) {
-  return readers.filter((item) => item.rank === reader.rank).length > 1 ? <span className="arena-tie">TIE</span> : null;
+  return getTieMark(readers, reader) ? <span className="arena-tie">TIE</span> : null;
 }
 
-function PodiumReader({ reader, readers, slotColumn, onSelect, paused, reduceMotion, burst }) {
-  const rankDelay = reader.rank === 3 ? 0.04 : reader.rank === 2 ? 0.22 : 0.4;
+function PodiumReader({ reader, readers, slotColumn, onSelect, paused, reduceMotion, hero = false, index = 0 }) {
+  const rankDelay = reader.rank === 1 && !hero ? 0.22 : index * 0.06;
+  const motion = getArenaMotionSettings(reduceMotion);
   return (
     <Motion.button
       type="button"
       layout
       layoutId={`arena-reader-${reader.key}`}
-      className={`arena-podium-reader rank-${reader.rank}`}
+      className={`arena-podium-reader rank-${reader.rank}${hero ? " arena-podium-hero" : ""}`}
       style={{ "--podium-col": slotColumn }}
       onClick={() => onSelect(reader)}
-      initial={reduceMotion ? false : { opacity: 0, y: 28, scale: 0.92 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: paused || reduceMotion ? 0 : 0.52, delay: paused || reduceMotion ? 0 : rankDelay, ease: [0.2, 0.72, 0.22, 1] }}
-      aria-label={`Rank ${reader.rank}, ${reader.name}, ${formatDuration(reader.totalSeconds)} reading time${reader.isYou ? ", you" : ""}`}
+      initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: paused ? 0 : motion.rise ? 0.38 : motion.fadeDuration, delay: paused || !motion.rise ? 0 : rankDelay, ease: [0.2, 0.72, 0.22, 1] }}
+      aria-label={readerAccessibleLabel(reader)}
     >
-      <span className="arena-podium-avatar-wrap" aria-hidden="true">
-        <span className="arena-avatar-ring" />
-        <span className="arena-avatar-initials">{initials(reader.name)}</span>
-        {reader.rank === 1 && <Crown className="arena-crown" size={23} fill="currentColor" />}
+      <span className="arena-podium-avatar-wrap">
+        <Motion.span
+          className="arena-avatar-entrance"
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.86 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: paused ? 0 : reduceMotion ? 0.12 : 0.34, delay: paused || reduceMotion ? 0 : rankDelay + 0.04 }}
+        ><ReaderAvatar reader={reader} size={hero ? "hero" : "podium"} /></Motion.span>
+        {reader.rank === 1 && <Crown className="arena-crown" size={hero ? 27 : 22} fill="currentColor" />}
       </span>
-      <span className="arena-podium-name">{reader.name}<TiesLabel reader={reader} readers={readers} />{reader.isYou && <span className="arena-you-tag">YOU</span>}</span>
-      <strong className="arena-podium-time"><CountUp value={reader.totalSeconds} delay={paused ? 0 : rankDelay} paused={paused || reduceMotion} /></strong>
+      <span className="arena-podium-name"><span className="arena-podium-name-text">{reader.name}</span><TiesLabel reader={reader} readers={readers} />{reader.isYou && <span className="arena-you-tag">YOU</span>}</span>
+      <strong className="arena-podium-time"><CountUp value={reader.totalSeconds} delay={paused ? 0 : rankDelay} paused={paused || reduceMotion} reduceMotion={reduceMotion} /></strong>
+      {hero && <span className="arena-hero-subtitle">YOUR RACE STARTS HERE</span>}
       <span className="arena-pedestal"><span>#{reader.rank}</span></span>
-      {reader.rank === 1 && burst && !reduceMotion && !paused && (
-        <span className="arena-stars-burst" aria-hidden="true">
-          {BURST_PARTICLES.map(([x, y], particleIndex) => <i key={particleIndex} style={{ "--burst-x": `${x}px`, "--burst-y": `${y}px`, animationDelay: `${particleIndex * 18}ms` }} />)}
-        </span>
-      )}
     </Motion.button>
   );
 }
 
-function RankingRow({ reader, readers, maximum, index, onSelect, paused, reduceMotion }) {
-  const percentage = maximum > 0 ? Math.max(3, Math.min(100, (reader.totalSeconds / maximum) * 100)) : 0;
+function RankingRow({ reader, readers, index, onSelect, paused, reduceMotion }) {
+  const tied = Boolean(getTieMark(readers, reader));
   return (
     <li>
       <Motion.button
         type="button"
         layout
         layoutId={`arena-reader-${reader.key}`}
-        className={`arena-row${reader.rank <= 10 ? " top-ten" : ""}${reader.isYou ? " is-you" : ""}`}
+        className={getArenaRowClassName(reader)}
         onClick={() => onSelect(reader)}
-        initial={reduceMotion ? false : { opacity: 0, y: 9 }}
+        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 7 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: paused || reduceMotion ? 0 : 0.28, delay: paused || reduceMotion ? 0 : Math.min(index * 0.035, 0.32) }}
-        aria-label={`Rank ${reader.rank}, ${reader.name}, ${formatDuration(reader.totalSeconds)} reading time${reader.isYou ? ", you" : ""}`}
+        transition={{ duration: paused ? 0 : reduceMotion ? 0.12 : 0.24, delay: paused || reduceMotion ? 0 : Math.min(index * 0.02, 0.18) }}
+        aria-label={readerAccessibleLabel(reader)}
       >
-        <span className="arena-row-rank">#{reader.rank}{readers.filter((item) => item.rank === reader.rank).length > 1 ? "=" : ""}</span>
-        <span className="arena-row-avatar" aria-hidden="true">{initials(reader.name)}</span>
+        <span className="arena-row-rank">#{reader.rank}{tied ? <span className="arena-tie-mark" aria-label="Tied rank">=</span> : null}</span>
+        <ReaderAvatar reader={reader} size="row" />
         <span className="arena-row-main">
           <span className="arena-row-name"><span className="arena-row-name-text">{reader.name}</span>{reader.isYou && <span className="arena-you-tag">YOU</span>}</span>
-          <span className="arena-stat-pills"><span className="arena-stat-pill"><Clock3 size={11} /> Reading time</span></span>
-          <span className="arena-row-progress" aria-hidden="true"><i style={{ transform: `scaleX(${percentage / 100})`, transitionDuration: paused || reduceMotion ? "0ms" : "650ms" }} /></span>
         </span>
-          <strong className="arena-row-score"><CountUp value={reader.totalSeconds} paused={paused || reduceMotion} /></strong>
+        <strong className="arena-row-score"><CountUp value={reader.totalSeconds} paused={paused || reduceMotion} reduceMotion={reduceMotion} /></strong>
       </Motion.button>
     </li>
   );
 }
 
-function SelfArenaCard({ reader, rankings, onJoin, visible, reduceMotion }) {
+function SelfArenaCard({ reader, rankings, isTopThree, onJoin }) {
   if (!reader) {
     return (
       <section className="arena-self arena-self-unranked" aria-label="Your Reader Arena ranking">
@@ -143,23 +129,11 @@ function SelfArenaCard({ reader, rankings, onJoin, visible, reduceMotion }) {
       </section>
     );
   }
-  const above = rankings.filter((entry) => entry.rank < reader.rank).sort((left, right) => right.rank - left.rank)[0];
-  const below = rankings.filter((entry) => entry.rank > reader.rank).sort((left, right) => left.rank - right.rank)[0];
-  const difference = above ? Math.max(1, above.totalSeconds - reader.totalSeconds + 1) : 0;
-  const span = above ? Math.max(1, above.totalSeconds - (below?.totalSeconds || 0)) : 1;
-  const progress = above ? Math.max(0, Math.min(100, ((reader.totalSeconds - (below?.totalSeconds || 0)) / span) * 100)) : 100;
   return (
-    <section className="arena-self" aria-label={`Your rank is ${reader.rank}`}>
+    <section className={`arena-self${isTopThree ? " compact" : ""}`} aria-label={`Your rank is ${reader.rank}`}>
       <span className="arena-self-medal"><Medal size={21} /></span>
-      <span className="arena-self-copy"><span>YOUR PLACE IN THE ARENA</span><b>#{reader.rank} this week · {formatDuration(reader.totalSeconds)}</b><small>{above ? `${formatDuration(difference)} more to reach #${above.rank}` : "You’re leading the reading race."}</small></span>
-      <Motion.span
-        className="arena-self-progress"
-        style={{ "--progress": `${progress}%` }}
-        initial={reduceMotion ? false : { scale: 0.72, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: visible && !reduceMotion ? 0.48 : 0, ease: "easeOut" }}
-        aria-label={`${Math.round(progress)} percent progress toward the next rank`}
-      ><span>{Math.round(progress)}%</span></Motion.span>
+      <ReaderAvatar reader={reader} size="self" />
+      <span className="arena-self-copy"><span>YOUR PLACE IN THE ARENA</span><b>#{reader.rank} · {formatDuration(reader.totalSeconds)}</b><small>{getArenaPlaceMessage(rankings, reader)}</small></span>
     </section>
   );
 }
@@ -171,10 +145,9 @@ export default function ReaderArena({ onBack, onLibrary }) {
   const [busy, setBusy] = useState(false);
   const [requestId, setRequestId] = useState(0);
   const [selectedReader, setSelectedReader] = useState(null);
-  const [burst, setBurst] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
   const touchStart = useRef(null);
   const firstResult = useRef(false);
-  const celebratedWinner = useRef(false);
   const { now, visible } = useArenaClock();
   const { triggerLightTap } = useHaptic();
   const reduceMotion = useReducedMotion();
@@ -193,13 +166,6 @@ export default function ReaderArena({ onBack, onLibrary }) {
       setStatus("ready");
       setBusy(false);
       firstResult.current = true;
-      if (!celebratedWinner.current && keyed.some((reader) => reader.rank === 1)) {
-        celebratedWinner.current = true;
-        if (!reduceMotion) {
-          setBurst(true);
-          window.setTimeout(() => setBurst(false), 1500);
-        }
-      } else firstResult.current = true;
     }).catch(() => {
       if (cancelled) return;
       setStatus(navigator.onLine === false ? "offline" : "error");
@@ -219,6 +185,43 @@ export default function ReaderArena({ onBack, onLibrary }) {
 
   function retry() {
     setRequestId((value) => value + 1);
+  }
+
+  async function inviteFriend() {
+    const reportInvite = (text) => {
+      setInviteMessage(text);
+      window.setTimeout(() => setInviteMessage(""), 2400);
+    };
+    const shareData = {
+      title: "Join my Reading Companion race",
+      text: "Read a few pages with me in the Reading Companion Reader Arena.",
+      url: new URL("/", window.location.origin).href,
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        reportInvite("Invite shared");
+        return;
+      }
+      await navigator.clipboard.writeText(shareData.url);
+      reportInvite("Arena link copied");
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      try {
+        const field = document.createElement("textarea");
+        field.value = shareData.url;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(field);
+        reportInvite(copied ? "Arena link copied" : "Copy the link from your browser address bar");
+      } catch {
+        reportInvite("Copy the link from your browser address bar");
+      }
+    }
   }
 
   function changePeriod(nextPeriod) {
@@ -249,9 +252,9 @@ export default function ReaderArena({ onBack, onLibrary }) {
   }
 
   const currentReader = rankings.find((reader) => reader.isYou) || null;
-  const podium = rankings.slice(0, 3);
-  const rows = rankings.slice(3);
-  const maximum = rankings[0]?.totalSeconds || 0;
+  const roster = getArenaRosterLayout(rankings);
+  const podium = roster.podium;
+  const rows = roster.rows;
 
   return (
     <MotionConfig reducedMotion={!visible || reduceMotion ? "always" : "never"}>
@@ -282,14 +285,19 @@ export default function ReaderArena({ onBack, onLibrary }) {
           onTouchEnd={handleTouchEnd}
         >
           {status === "loading" && rankings.length === 0 && (
-            <div className="arena-state" role="status" aria-label="Loading Reader Arena rankings"><div className="arena-skeleton"><i /><i /><i /></div></div>
+            <div className="arena-loading" role="status" aria-label="Loading Reader Arena rankings">
+              <div className="arena-skeleton-stage"><i /><i /><i /></div>
+              <div className="arena-skeleton-rows"><i /><i /><i /></div>
+            </div>
           )}
           {(status === "offline" || status === "error") && (
             <div className="arena-state" role="alert"><div className="arena-state-copy">
               <span className="arena-state-icon">{status === "offline" ? <WifiOff size={22} /> : <RefreshCw size={21} />}</span>
               <h2>{status === "offline" ? "The Arena is out of reach" : "The rankings didn’t load"}</h2>
               <p>{status === "offline" ? "Reconnect to see the latest reading standings." : "Your reading time is safe. Try loading the rankings again."}</p>
-              <button type="button" className="arena-action" onClick={retry}><RefreshCw size={14} /> Try again</button>
+              <button type="button" className="arena-action" onClick={retry} disabled={busy}>
+                <RefreshCw size={14} className={busy ? "spinning" : ""} /> {busy ? "Trying again…" : "Try again"}
+              </button>
             </div></div>
           )}
           {status === "ready" && rankings.length === 0 && (
@@ -301,24 +309,27 @@ export default function ReaderArena({ onBack, onLibrary }) {
             </div></div>
           )}
           {status === "ready" && rankings.length > 0 && (
-            <>
-              <section className="arena-stage" aria-label="Top three readers">
-                <span className="arena-beam" aria-hidden="true" />
-                {podium.map((reader, index) => {
-                  const slotColumn = podium.length === 1 ? 2 : podium.length === 2 ? [2, 1][index] : [2, 1, 3][index];
-                  return <PodiumReader key={reader.key} reader={reader} readers={rankings} slotColumn={slotColumn} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} burst={burst} />;
-                })}
-              </section>
-              {rows.length > 0 && <>
-                <div className="arena-list-heading"><span>THE FIELD</span><span>{rankings.length} readers · ranked by time</span></div>
-                <ol className="arena-rows" aria-label="Other readers, ranked by reading time">
-                  {rows.map((reader, index) => <RankingRow key={reader.key} reader={reader} readers={rankings} maximum={maximum} index={index} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} />)}
-                </ol>
-              </>}
-            </>
+            <AnimatePresence mode="wait" initial={false}>
+              <Motion.div key={period} className="arena-results" initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -6 }} transition={{ duration: reduceMotion ? 0.12 : 0.2 }}>
+                <section className={`arena-stage mode-${roster.mode}`} aria-label={roster.mode === "hero" ? "Reader Arena leader" : roster.mode === "duo" ? "Reader Arena top two" : "Reader Arena top three"}>
+                  {roster.mode === "podium" && <span className="arena-beam" aria-hidden="true" />}
+                  {podium.map((reader, index) => <PodiumReader key={reader.key} reader={reader} readers={rankings} slotColumn={reader.slotColumn} index={index} hero={roster.mode === "hero"} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} />)}
+                </section>
+                {roster.showInvite && <div className="arena-invite-wrap">
+                  <button type="button" className="arena-invite" onClick={inviteFriend}><Share2 size={16} /> Invite a friend to race</button>
+                  {inviteMessage && <span className="arena-invite-status" aria-live="polite">{inviteMessage}</span>}
+                </div>}
+                {rows.length > 0 && <section className="arena-rows-scroll" aria-label="Reader rankings">
+                  <div className="arena-list-heading"><span>THE FIELD</span><span>{rows.length} readers · ranks follow reading time; ties share rank</span></div>
+                  <ol className="arena-rows" aria-label="Readers ranked by reading time">
+                    {rows.map((reader, index) => <RankingRow key={reader.key} reader={reader} readers={rankings} index={index} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} />)}
+                  </ol>
+                </section>}
+              </Motion.div>
+            </AnimatePresence>
           )}
         </main>
-        {status === "ready" && <SelfArenaCard reader={currentReader} rankings={rankings} onJoin={onLibrary} visible={visible} reduceMotion={reduceMotion} />}
+        {status === "ready" && <SelfArenaCard reader={currentReader} rankings={rankings} isTopThree={currentReader ? currentReader.rank <= 3 : false} onJoin={onLibrary} />}
 
         <AnimatePresence>
           {selectedReader && (
@@ -327,7 +338,7 @@ export default function ReaderArena({ onBack, onLibrary }) {
                 <span className="arena-sheet-grab" aria-hidden="true" />
                 <button type="button" className="arena-sheet-close" onClick={() => setSelectedReader(null)} aria-label="Close reader details"><X size={17} /></button>
                 <div className="arena-sheet-profile">
-                  <span className="arena-sheet-avatar" aria-hidden="true">{initials(selectedReader.name)}</span>
+                  <ReaderAvatar reader={selectedReader} size="sheet" />
                   <span><h2 id="arena-reader-sheet-title">{selectedReader.name}</h2><p>Reader #{selectedReader.rank}{selectedReader.isYou ? " · You" : ""}</p></span>
                 </div>
                 <div className="arena-sheet-stat"><Clock3 size={15} /> {formatDuration(selectedReader.totalSeconds)} reading time {period === "weekly" ? "this week" : "all time"}</div>

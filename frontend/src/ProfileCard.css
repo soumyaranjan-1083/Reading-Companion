@@ -1,16 +1,19 @@
 /* Profile card: a "reader pass" with a slow iridescent rim and soft ripples */
-.pc { flex: 0 0 auto; min-height: min-content; overflow: hidden; --pc-a: #7c5cff; --pc-b: #3ec6e0; --pc-c: #ffb454; position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; padding: 22px 18px 20px; border-radius: 28px; text-align: center; color: var(--text); background: linear-gradient(165deg, color-mix(in srgb, var(--pc-a) 11%, var(--surface)), var(--surface) 60%); box-shadow: var(--shadow); }
+.pc { flex: 0 0 auto; min-height: min-content; overflow: hidden; --pc-a: #7c5cff; --pc-b: #3ec6e0; --pc-c: #ffb454; position: sticky; top: 0; z-index: 5; isolation: isolate; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; padding: 22px 18px 20px; border-radius: 28px; text-align: center; color: var(--text); background: linear-gradient(165deg, color-mix(in srgb, var(--pc-a) 11%, var(--surface)), var(--surface) 60%); box-shadow: var(--shadow); }
+.pc > :not(.pc-rim):not(.pc-float) { position: relative; z-index: 1; }
 .pc-rim { position: absolute; inset: 0; z-index: -1; border-radius: inherit; padding: 1.5px; background: linear-gradient(120deg, var(--pc-a), var(--pc-b), var(--pc-c), var(--pc-a)) 0 0 / 300% 100%; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); opacity: 0.7; animation: pcRim 14s linear infinite; }
 .pc-stage { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 124px; margin: 2px 0; }
 .pc-stage .pc-avatar { margin: 0; }
 .pc-ripples { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; }
 .pc-ripples i { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--pc-a) 55%, transparent); animation: pcRipple 6.6s ease-out infinite; will-change: transform, opacity; }
 .pc-ripples i:nth-child(2) { animation-delay: -2.2s; } .pc-ripples i:nth-child(3) { animation-delay: -4.4s; }
-.pc-float { position: absolute; inset: 0; pointer-events: none; }
+.pc-float { position: absolute; z-index: 0; inset: 0; pointer-events: none; }
 .pc-float i { position: absolute; display: grid; place-items: center; opacity: 0.5; transform: translate(-50%, -50%); animation: pcDrift 8s ease-in-out infinite; will-change: transform; }
 .pc-float b { font-family: "Fraunces", serif; font-weight: 700; letter-spacing: -0.02em; }
 [data-theme="light"] .pc-float i { opacity: 0.5; }
-@media (max-width: 340px) { .pc-float i:nth-child(n+7) { display: none; } }.pc-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 99px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--pc-a); background: color-mix(in srgb, var(--pc-a) 12%, transparent); }
+@media (max-width: 340px) { .pc-float i:nth-child(n+7) { display: none; } }
+.pc-float i:nth-child(9), .pc-float i:nth-child(10) { display: grid; }
+.pc-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 99px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--pc-a); background: color-mix(in srgb, var(--pc-a) 12%, transparent); }
 .pc-avatar { position: relative; width: 104px; height: 104px; margin: 4px 0 2px; flex: 0 0 auto; }
 .pc-photo { position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 50%; overflow: hidden; cursor: pointer; background: var(--surface-2); box-shadow: 0 0 0 4px var(--surface), 0 0 0 6px color-mix(in srgb, var(--pc-a) 55%, transparent), 0 16px 30px -12px color-mix(in srgb, var(--pc-a) 60%, transparent); }
 .pc-photo .avatar-img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 20%; }
@@ -20,6 +23,13 @@
 .pc-name { width: min(100%, 260px); padding: 4px 8px; border: 0; border-bottom: 1.5px solid transparent; background: transparent; color: var(--text); text-align: center; font-family: "Fraunces", serif; font-size: 25px; font-weight: 600; outline: 0; transition: border-color 0.2s; }
 .pc-name:hover { border-bottom-color: var(--border); }
 .pc-name:focus { border-bottom-color: var(--pc-a); }
+.pc-uid { display: flex; align-items: center; justify-content: center; gap: 8px; width: min(100%, 340px); min-width: 0; margin-top: -8px; color: var(--muted); }
+.pc-uid > span { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; }
+.pc-uid > span svg { flex: 0 0 auto; color: var(--pc-a); }
+.pc-uid b { flex: 0 0 auto; font-weight: 800; }
+.pc-uid code { overflow-wrap: anywhere; color: var(--text); font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.pc-uid button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: 0 0 auto; min-height: 30px; padding: 0 7px; border: 1px solid var(--border); border-radius: 9px; color: var(--pc-a); cursor: pointer; background: color-mix(in srgb, var(--pc-a) 8%, var(--surface)); }
+.pc-uid button small { font-size: 10px; font-weight: 750; }
 .pc-change { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 16px; border: 1px solid var(--border); border-radius: 99px; color: var(--text); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; background: var(--surface); transition: border-color 0.2s, background 0.2s; }
 .pc-change:hover { border-color: var(--pc-a); }
 .pc-change svg:last-child { transition: transform 0.3s; }

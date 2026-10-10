@@ -12,6 +12,7 @@ export default function UpdateAnnouncement({ available, releases = [], paused = 
   const [busy, setBusy] = useState(false);
   const open = available && !paused && phase !== "closed";
   const newest = releases[0]?.version;
+  const latestTitle = releases[0]?.title;
   const highlights = releases
     .flatMap((release) => (release.items || []).map((item, index) => ({ ...item, key: `${release.version}-${index}` })))
     .slice(0, 4);
@@ -30,33 +31,35 @@ export default function UpdateAnnouncement({ available, releases = [], paused = 
             exit={{ opacity: 0, y: 24, scale: 0.96 }}
             transition={{ type: "spring", stiffness: 260, damping: 24 }}
           >
-            <span className="ua-spark ua-spark-1" aria-hidden="true" />
-            <span className="ua-spark ua-spark-2" aria-hidden="true" />
-            <span className="ua-spark ua-spark-3" aria-hidden="true" />
-
             {phase === "prompt" ? (
               <>
-                <div className="ua-icon"><Rocket size={26} /></div>
+                <div className="ua-heading">
+                  <div className="ua-icon"><Rocket size={24} /></div>
+                  <span className="ua-version">{newest ? `v${newest}` : "New release"}</span>
+                </div>
                 <h2 id="ua-title">Update available</h2>
-                <p className="ua-sub">{newest ? `Version ${newest} is ready for you.` : "A newer version of Reading Companion is ready."}</p>
+                <p className="ua-sub">{latestTitle ? `${latestTitle} is ready to install.` : "A newer version of Reading Companion is ready."}</p>
 
                 {highlights.length > 0 && (
-                  <ul className="ua-list">
-                    {highlights.map((item, index) => {
-                      const Icon = ICON[item.type] || Sparkles;
-                      return (
-                        <Motion.li
-                          key={item.key}
-                          initial={{ opacity: 0, x: -14 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 0.15 + index * 0.08 }}
-                        >
-                          <span className="ua-li-icon"><Icon size={14} /></span>
-                          <span><em>{LABEL[item.type] || "New"}</em> {item.text}</span>
-                        </Motion.li>
-                      );
-                    })}
-                  </ul>
+                  <>
+                    <div className="ua-changelog-heading"><span>What's new</span><small>{highlights.length} highlights</small></div>
+                    <ul className="ua-list">
+                      {highlights.map((item, index) => {
+                        const Icon = ICON[item.type] || Sparkles;
+                        return (
+                          <Motion.li
+                            key={item.key}
+                            initial={{ opacity: 0, x: -14 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.15 + index * 0.08 }}
+                          >
+                            <span className="ua-li-icon"><Icon size={14} /></span>
+                            <span><em>{LABEL[item.type] || "New"}</em> {item.text}</span>
+                          </Motion.li>
+                        );
+                      })}
+                    </ul>
+                  </>
                 )}
 
                 <div className="ua-actions">

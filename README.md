@@ -1,6 +1,16 @@
 # Reading Companion
 
-A personal reading companion app built with React + Vite on the frontend and a small Node/Express backend for AI session orchestration. Version 2.4.0 adds **Reader Arena & Honest Eyes**, keeping reader data local-first with optional private per-account cloud snapshots.
+A personal reading companion app built with React + Vite on the frontend and a small Node/Express backend for AI session orchestration. Version 2.5.0, **Every Line, Reimagined**, includes Gem Studio alongside Reader Arena, Profile, Help and update-delivery improvements while keeping reader data local-first with optional private per-account cloud snapshots.
+
+## Version 2.5.0: Every Line, Reimagined
+
+- Gem Studio offers 14 quote-card templates, live previews, three aspect ratios and one-tap surprise styling.
+- Profile shows a copyable Supabase UID and keeps the reader card visible while its options scroll.
+- Reading-limit and access requests launch prefilled email drafts with account context.
+- Reader Arena recovers from the Supabase schema-cache issue and provides explicit loading, empty, error and retry states.
+- Help & Guide and release alerts explain the updated workflows; deployment pushes are opt-in.
+
+Apply the Arena schema-cache refresh migration after the weekly ranking migration.
 
 ## Version 2.4.0: Reader Arena & Honest Eyes
 
@@ -9,8 +19,14 @@ A personal reading companion app built with React + Vite on the frontend and a s
 - Before using a new page photo, the app checks whether it shows book text. Unrelated and unreadable photos are blocked; if the check is unavailable, the photo remains unverified and is not sent to the reading model.
 - Empty placeholder chapters are explicitly marked as unknown, and the companion is instructed to answer only from the reader’s words, saved context, or verified page transcription.
 - The profile and Arena are designed for both themes, touch and keyboard navigation, and reduced-motion preferences.
+- Reader Arena retries ranking errors, and Profile shows a copyable account UID while its reader card stays visible during scrolling.
+- Documentation access and reading-limit requests open pre-filled email drafts; reading limits are managed directly in Supabase.
+- Gem downloads include 14 templates, three aspect ratios, color accents and live quote previews.
+- Readers who opt in to app announcements can receive a push notification after a successful production deployment.
+- Reader Arena adapts to small rosters, shows privately shared profile photos, supports photo opt-out, and keeps the own-place summary pinned above navigation.
+- Arena photo storage uses a private Supabase bucket; apply [the Arena avatar migration](supabase/migrations/20261017130000_add_reader_arena_avatars.sql) before deploying this release.
 
-Apply [the account reading-limit migration](supabase/migrations/20261014120000_add_account_reading_limits.sql), [the all-time ranking migration](supabase/migrations/20261015120000_add_reader_rankings.sql), and [the weekly Arena migration](supabase/migrations/20261016120000_add_reader_arena_weekly_rankings.sql) before deploying. `READING_VERIFY_MODEL` is optional and defaults to `READING_TEXT_MODEL`.
+Apply [the account reading-limit migration](supabase/migrations/20261014120000_add_account_reading_limits.sql), [the all-time ranking migration](supabase/migrations/20261015120000_add_reader_rankings.sql), [the weekly Arena migration](supabase/migrations/20261016120000_add_reader_arena_weekly_rankings.sql), and [the Arena schema-cache refresh](supabase/migrations/20261017120000_reload_reader_arena_rpc_schema.sql) before deploying. `READING_VERIFY_MODEL` is optional and defaults to `READING_TEXT_MODEL`.
 
 See [the page-grounding red-team checklist](docs/grounding-redteam.md) for the manual photo and hallucination checks.
 
@@ -48,9 +64,9 @@ The microphone remains captured locally and PCM audio is sent to the Live sessio
 
 Book deletion is a soft delete: the book record stores its archived related gems and conversation recap, while active Library and Mind Map views stop exposing them. Restore rehydrates those records; permanent deletion removes the archived book record and its embedded relationships. Reading limits and active usage are stored per Supabase user in `reading_companion_session_limits`; server-side RPCs reset usage on the UTC date boundary and atomically cap recorded seconds. The frontend batches short usage increments and keeps unsubmitted seconds scoped to the signed-in account for recovery after a reload.
 
-Reader ranking compares accepted active reading seconds across every genre. The authenticated leaderboard displays each reader's profile name and reading time; weekly aggregation begins when the weekly Arena migration is applied, so earlier weekly time cannot be backfilled. Deleting the account snapshot also clears that reader's ranking totals.
+Reader ranking compares accepted active reading seconds across every genre. The authenticated leaderboard displays each reader's profile name and reading time; weekly aggregation begins when the weekly Arena migration is applied, so earlier weekly time cannot be backfilled. The server associates totals with Supabase user IDs but does not return other readers' IDs to the client. Deleting the account snapshot also clears that reader's ranking totals.
 
-Apply [the account reading-limit migration](supabase/migrations/20261014120000_add_account_reading_limits.sql) and [the reader-ranking migration](supabase/migrations/20261015120000_add_reader_rankings.sql) before deploying this version. Configure the backend-only `SESSION_LIMIT_ADMIN_USER_IDS` as a comma-separated list of Supabase auth user UUIDs allowed to change another reader’s daily minutes from Settings. Never expose the Supabase service-role key to the frontend. Readers may view their limit, but only allowlisted administrators can change it.
+Apply [the account reading-limit migration](supabase/migrations/20261014120000_add_account_reading_limits.sql) and [the reader-ranking migration](supabase/migrations/20261015120000_add_reader_rankings.sql) before deploying this version. Reading limits are viewed in Settings and changed directly in Supabase; never expose the Supabase service-role key to the frontend.
 
 The app can request a screen wake lock only while the reading screen is visible and the browser supports it. Browsers may suspend microphone access and timers in the background or when the phone is locked; local audio processing, continuous streaming and a lit screen can still warm a phone. Neither uninterrupted lock-screen listening nor zero device heat can be guaranteed by a web app.
 
@@ -71,6 +87,7 @@ The app can request a screen wake lock only while the reading screen is visible 
 1. Apply [the push subscription migration](supabase/migrations/20261011120000_create_push_subscriptions.sql) and [the status-note dedupe migration](supabase/migrations/20261010120000_dedupe_bug_report_status_notes.sql).
 2. Generate keys with `npm run push:keys -w backend` and set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` on the backend. Set `ADMIN_TOKEN` too.
 3. Send an announcement with `npm run push:send -w backend -- --title "New update" --body "Version 2.1.0 is live" --url /`, or `POST /api/push/send` with the `x-admin-token` header and a `{ "title", "body", "url" }` body.
+  Successful production deployments from `main` are announced by [the GitHub Actions workflow](.github/workflows/announce-production-deploy.yml). Configure the same backend `ADMIN_TOKEN` as a GitHub Actions repository secret named `ADMIN_TOKEN`, and make sure the hosting integration emits successful production deployment-status events. Broadcasts go only to devices that enabled **App updates & announcements**.
 4. Study reminders are checked every 5 minutes while the backend is awake. On hosts that sleep, schedule an external cron to `POST /api/push/reminders/run` with `x-admin-token` every 5–10 minutes.
 
 5. Report-status pushes: apply [the push endpoint migration](supabase/migrations/20261012120000_add_bug_report_push_endpoint.sql), then in Supabase go to Database, Webhooks, create one on `bug_reports` for UPDATE that POSTs to `https://<backend>/api/push/report-status` with the header `x-admin-token`.

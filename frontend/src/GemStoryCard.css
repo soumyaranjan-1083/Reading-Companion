@@ -1,18 +1,17 @@
 /* ============ overlay + dock (app UI, not exported) ============ */
 .gsc-overlay {
-  position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center;
-  padding: 16px 16px 120px;
+  position: fixed; inset: 0; z-index: 200; display: block; padding: 0;
   background: radial-gradient(120% 80% at 50% 0%, #1a1233, #07070b 60%);
 }
-.gsc-stage { border-radius: 26px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); }
-.gsc-scale { width: 1080px; height: 1920px; transform-origin: top left; }
+.gsc-stage { position: absolute; top: 14px; left: 50%; translate: -50% 0; border-radius: 15px; overflow: hidden; box-shadow: 0 24px 66px rgba(0,0,0,.58), 0 0 0 1px rgba(255,255,255,.12); }
+.gsc-scale { position: relative; width: 1080px; height: 1920px; transform-origin: top left; }
 
 .gsc-dock {
-  position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); translate: -50% 0;
-  display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 28px; z-index: 210;
-  background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);
+  position: fixed; left: 50%; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); translate: -50% 0;
+  display: flex; flex-direction: column; gap: 9px; width: min(680px, calc(100vw - 20px)); max-height: min(44dvh, 380px); overflow-y: auto; padding: 10px; border-radius: 20px; z-index: 210;
+  background: rgba(21,20,29,.82); border: 1px solid rgba(255,255,255,.2);
   backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: 0 20px 50px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.14);
+  box-shadow: 0 16px 45px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.14);
 }
 .gsc-btn {
   display: inline-flex; align-items: center; gap: 8px; border: none; cursor: pointer; color: #fff;
@@ -24,6 +23,37 @@
 .gsc-btn:not(.primary):not(:disabled):hover { background: rgba(255,255,255,.1); }
 .gsc-btn.primary { background: linear-gradient(135deg, #8B5CF6, #6366F1); box-shadow: 0 8px 22px rgba(99,102,241,.5); }
 .gsc-btn.icon { padding: 13px; background: rgba(255,255,255,.08); }
+.gsc-btn:disabled { cursor: not-allowed; }
+.gsc-template-section { display: flex; flex: 0 0 auto; flex-direction: column; gap: 7px; min-width: 0; }
+.gsc-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.gsc-picker-heading > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gsc-picker-heading b { color: #fff; font: 700 12px/1.2 Inter, system-ui, sans-serif; }
+.gsc-picker-heading span { overflow: hidden; max-width: 48ch; color: rgba(255,255,255,.64); font: 400 9px/1.25 Inter, system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+.gsc-surprise { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 0 auto; min-height: 31px; padding: 0 9px; border: 1px solid rgba(255,255,255,.22); border-radius: 10px; color: #fff; font: 700 10px/1 Inter, system-ui, sans-serif; cursor: pointer; background: rgba(255,255,255,.08); }
+.gsc-template-strip { display: flex; align-items: flex-start; gap: 8px; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 2px 1px 5px; scroll-snap-type: x mandatory; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.32) transparent; }
+.gsc-template-choice { display: flex; flex: 0 0 78px; flex-direction: column; align-items: center; gap: 4px; min-width: 0; padding: 3px; border: 1px solid transparent; border-radius: 8px; color: rgba(255,255,255,.72); cursor: pointer; background: transparent; scroll-snap-align: start; }
+.gsc-template-choice.on { border-color: #f3d38a; color: #fff; background: rgba(243,211,138,.12); }
+.gsc-template-name { max-width: 100%; overflow: hidden; font: 600 9px/1.2 Inter, system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+.gsc-selected-check { position: absolute; top: 4px; right: 4px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; color: #1c2420; background: #f3d38a; }
+.gsc-control-row { display: flex; align-items: flex-end; gap: 9px; min-width: 0; padding-top: 2px; border-top: 1px solid rgba(255,255,255,.12); }
+.gsc-control-group { display: flex; flex: 0 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
+.gsc-control-label { color: rgba(255,255,255,.55); font: 700 8px/1 Inter, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+.gsc-effect-btn { min-height: 39px; gap: 6px; padding: 8px 9px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; font-size: 10px; }
+.gsc-effect-btn:disabled { cursor: not-allowed; opacity: .54; }
+.gsc-aspect-toggle { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; background: rgba(0,0,0,.18); }
+.gsc-aspect-toggle button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 35px; padding: 2px 7px; border: 0; border-radius: 8px; color: rgba(255,255,255,.64); font: 700 9px/1 Inter, system-ui, sans-serif; cursor: pointer; background: transparent; }
+.gsc-aspect-toggle button small { font-size: 7px; font-weight: 500; opacity: .74; }
+.gsc-aspect-toggle button.on { color: #201b13; background: #f3d38a; }
+.gsc-actions { display: flex; flex: 0 0 auto; align-items: flex-end; gap: 4px; margin-left: auto; }
+.gsc-actions .gsc-btn { min-height: 39px; padding: 8px; border-radius: 11px; }
+.gsc-actions .gsc-btn.primary { gap: 5px; padding: 8px 10px; font-size: 10px; }
+.gsc-menu-wrap { position: relative; }
+.gsc-menu-wrap > .gsc-menu { left: 0; bottom: calc(100% + 8px); width: 178px; max-height: 34dvh; overflow-y: auto; }
+.gsc-menu-wrap .gsc-opt { gap: 9px; padding: 9px 10px; font-size: 11px; }
+.gsc-menu-wrap .gsc-swatch { width: 15px; height: 15px; }
+.gsc-menu.gsc-effect-menu { position: fixed; z-index: 1000; width: min(220px, calc(100vw - 20px)); max-height: min(40dvh, 300px); overflow-y: auto; padding: 8px; border-radius: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.gsc-effect-menu .gsc-opt { min-width: 0; gap: 6px; padding: 8px 7px; border-radius: 9px; font-size: 10px; }
+.gsc-effect-menu .gsc-swatch { flex-basis: 14px; width: 14px; height: 14px; }
 .gsc-toast {
   position: fixed; left: 50%; translate: -50% 0; bottom: calc(100px + env(safe-area-inset-bottom, 0px)); z-index: 210;
   padding: 9px 16px; border-radius: 99px; font: 600 12px 'Inter', system-ui, sans-serif; color: #fff;
@@ -35,7 +65,7 @@
   --acc: #f2c48d; --sh: 5,5,10; --mesh: none;
   --imgf: saturate(1.1) contrast(1.05) brightness(.86);
   position: relative; width: 1080px; height: 1920px; overflow: hidden;
-  background: #07070b; color: #fff; font-family: 'Inter', system-ui, sans-serif;
+  background: #07070b; color: #fff; font-family: 'Inter', 'Noto Sans Devanagari', system-ui, sans-serif;
 }
 .gsc-card.aurora {
   --acc: #c4b5fd; --sh: 12,7,30;
@@ -114,7 +144,7 @@
   text-shadow: 0 6px 40px rgba(0,0,0,.45);
 }
 .gsc-bottom blockquote {
-  margin: 0; font-family: 'Playfair Display', Georgia, serif; font-weight: 500;
+  margin: 0; font-family: 'Playfair Display', 'Noto Sans Devanagari', Georgia, serif; font-weight: 500;
   line-height: 1.24; letter-spacing: -.012em; color: #fff; text-wrap: balance;
   text-shadow: 0 4px 34px rgba(0,0,0,.6), 0 1px 3px rgba(0,0,0,.45);
 }
@@ -126,7 +156,6 @@
 .gsc-by span + span::before { content: "·"; margin-right: 22px; color: var(--acc); }
 .gsc-date { margin-top: 18px; font: 500 22px 'Inter', sans-serif; letter-spacing: .04em; color: rgba(255,255,255,.64); }
 /* ============ style dropdown ============ */
-.gsc-menu-wrap { position: relative; }
 .gsc-menu {
   position: absolute; left: 0; bottom: calc(100% + 18px); width: 210px; max-height: 46vh; overflow-y: auto;
   padding: 6px; border-radius: 22px; display: flex; flex-direction: column; gap: 2px;
