@@ -40,15 +40,26 @@ export function pcmToWavBase64(samples, sampleRate = 16000) {
 }
 
 // Asks the backend whether this clip is a companion request, an explicit quiet command, or reading aloud.
-export async function classifyUtterance(samples, { companionName = "", book = "" } = {}) {
+export async function classifyUtterance(samples, { companionName = "", book = "", signal } = {}) {
   const body = JSON.stringify({ audio: pcmToWavBase64(samples), companionName, book });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetch(apiUrl("/api/reading/classify-utterance"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      signal: AbortSignal.timeout(12000),
-    });
+    if (signal?.aborted) throw signal.reason || new DOMException("Aborted", "AbortError");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), 12_000);
+    const onAbort = () => controller.abort(signal.reason || new DOMException("Aborted", "AbortError"));
+    signal?.addEventListener("abort", onAbort, { once: true });
+    let response;
+    try {
+      response = await fetch(apiUrl("/api/reading/classify-utterance"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+    }
     if (response.ok) {
       const data = await response.json();
       return { ask: data.ask === true, reading: data.reading === true };

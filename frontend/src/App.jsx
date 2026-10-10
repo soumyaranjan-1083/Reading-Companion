@@ -30,7 +30,7 @@ function buildOpeningNote(cont) {
     (recent.length ? `Your recent openings were: ${recent.map((r) => `"${r}"`).join("; ")}. Do NOT reuse or closely paraphrase any of them. ` : "") +
     "Then stay quiet and listen.";
 }
-import { AnimatePresence, motion as Motion } from "framer-motion";
+import { AnimatePresence, motion as Motion, useReducedMotion } from "framer-motion";
 import {
     AlertTriangle,
     BookMarked,
@@ -80,7 +80,7 @@ import {
     WifiOff,
     X as XIcon
 } from "lucide-react";
-import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAccount } from "./AccountContext.js";
 import AccountGate from "./AccountGate.jsx";
@@ -99,6 +99,9 @@ import MascotCharacter from "./components/MascotCharacter.jsx";
 import { describeLiveStatus, friendlyErrorMessage } from "./friendlyErrors.js";
 import { GeminiLiveClient } from "./geminiLiveClient.js";
 import { createOpeningMicFallback, SessionMicGate } from "./sessionMicGate.js";
+import { SessionAudioMute } from "./sessionAudioMute.js";
+import { sessionStatusView } from "./sessionStatus.js";
+import { summarizeLatencies } from "./sessionLatency.js";
 import { buildPageStatusNote, createPageContextProvider, loadPage, pageCanBeSentToLive, savePage } from "./sessionPage.js";
 import { pageVerificationDecision, parsePageVerificationResponse, rejectedPageMessage } from "./pageVerification.js";
 import { buildPlaceholderChapterKnowledgeBlock, groundPlaceholderBookContext, isPlaceholderChapter } from "./readingGrounding.js";
@@ -2954,6 +2957,13 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const [speaking, setSpeaking] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  const sessionAudioMuteRef = useRef(null);
+  const muteStartedAtRef = useRef(null);
+  const unmuteClassRef = useRef(null);
+  const unmuteLatencySamplesRef = useRef({ warm: [], cold: [] });
+  const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
+  const reduceMotion = useReducedMotion();
   const [, setSleepState] = useState("active");
   const [chapterNumber, setChapterNumber] = useState(book?.currentChapterNumber || 1);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
@@ -3024,6 +3034,10 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   useBackLayer(feedOpen, () => setFeedOpen(false));
   useBackLayer(Boolean(pendingShot), () => setPendingShot(null));
   useBackLayer(Boolean(rejectedShot), () => setRejectedShot(null));
+  useBackLayer(sessionInfoOpen, () => setSessionInfoOpen(false));
+  useEffect(() => {
+    void fetch(apiUrl("/api/health"), { cache: "no-store" }).catch(() => {});
+  }, []);
   const snapBase64Ref = useRef(null);
   const pageRef = useRef(null);
   const pageProviderRef = useRef(createPageContextProvider());
@@ -3032,8 +3046,11 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   const openingMicFallbackRef = useRef(null);
   const vadRef = useRef(null);
   const vadStartingRef = useRef(false);
+  const vadGenerationRef = useRef(0);
   const readingModeRef = useRef(false);
   const classifyNoticeAtRef = useRef(0);
+  const classifyAbortRef = useRef(null);
+  const pageVerificationAbortRef = useRef(null);
   const lastSpecAtRef = useRef(0);
   const memorySavedTurnRef = useRef(false);
   const warmTimerRef = useRef(null);
@@ -3192,6 +3209,8 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
 
     return () => {
       clearInterval(sleepInterval);
+      sessionAudioMuteRef.current?.dispose();
+      sessionAudioMuteRef.current = null;
       clearTimeout(followTimerRef.current);
       clearTimeout(quietModeTimerRef.current);
       clearTimeout(activityTimerRef.current);
@@ -3218,6 +3237,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   function ensureConnected({ silent = false } = {}) {
+    if (mutedRef.current && !sessionAudioMuteRef.current?.isUnmuting()) return Promise.reject(new Error("Microphone is muted."));
     const client = clientRef.current;
     if (!client) return Promise.reject(new Error("Voice is still starting. Try again in a moment."));
     if (client.ready || client.session) return Promise.resolve();
@@ -3237,7 +3257,13 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     return connectionPromiseRef.current;
   }
 
+  async function warmSessionAfterUnmute() {
+    await ensureConnected({ silent: true });
+    if (!mutedRef.current) setStatus("Listening for your question");
+  }
+
   function armFollowUp() {
+    if (mutedRef.current) return;
     clearTimeout(followTimerRef.current);
     clearTimeout(quietModeTimerRef.current);
     followTimerRef.current = setTimeout(() => {
@@ -3258,6 +3284,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   function enterQuietReadingMode() {
+    if (mutedRef.current) return;
     readingModeRef.current = true;
     setStatus("Quiet reading · still listening");
     void clientRef.current?.sendSilentContext("[SYSTEM NOTE] The reader has been quiet for the follow-up window or explicitly asked for quiet. Continue listening without speaking; answer only a new direct request, greeting, or companion-name address.")
@@ -3265,6 +3292,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   function armQuietMode() {
+    if (mutedRef.current) return;
     clearTimeout(quietModeTimerRef.current);
     quietModeTimerRef.current = setTimeout(() => {
       if (askingRef.current || audioPlaybackRef.current?.isActuallyPlaying?.() || clientRef.current?.pendingTool) {
@@ -3276,7 +3304,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   function startAsk() {
-    if (LEGACY_STREAMING || asking || muted || restorePrompt || snapBusy) return;
+    if (LEGACY_STREAMING || asking || mutedRef.current || muted || restorePrompt || snapBusy) return;
     if (!audioCaptureRef.current?.stream) {
       notify("Mic ready nahi hai. Permission allow karke dobara try kijiye.", "error");
       return;
@@ -3313,8 +3341,23 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     if (asking) stopAsk(); else startAsk();
   }
 
-    async function startAutoListen() {
-    if (LEGACY_STREAMING || vadRef.current || vadStartingRef.current || !audioCaptureRef.current?.stream) return;
+  function stopAutoListen() {
+    vadGenerationRef.current += 1;
+    vadStartingRef.current = false;
+    classifyAbortRef.current?.abort();
+    classifyAbortRef.current = null;
+    pageVerificationAbortRef.current?.abort();
+    pageVerificationAbortRef.current = null;
+    const vad = vadRef.current;
+    vadRef.current = null;
+    if (vad) void vad.destroy().catch((error) => console.warn("[VAD] cleanup failed", error));
+    micGateRef.current?.reset();
+    setHandsFree(false);
+  }
+
+  async function startAutoListen() {
+    if (LEGACY_STREAMING || mutedRef.current || vadRef.current || vadStartingRef.current || !audioCaptureRef.current?.stream) return;
+    const generation = vadGenerationRef.current;
     vadStartingRef.current = true;
     try {
       const { MicVAD } = await import("@ricky0123/vad-web");
@@ -3334,7 +3377,15 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
         },
         onVADMisfire: () => { startedOverPlayback = false; },
       });
+      if (mutedRef.current || generation !== vadGenerationRef.current) {
+        await vad.destroy();
+        return;
+      }
       await vad.start();
+      if (mutedRef.current || generation !== vadGenerationRef.current) {
+        await vad.destroy();
+        return;
+      }
       vadRef.current = vad;
     } catch (error) {
       console.warn("[VAD] auto-listen unavailable", error);
@@ -3346,7 +3397,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
 
   async function handleAutoSegment(samples, duringPlayback) {
     questionEndAtRef.current = performance.now();
-    if (duringPlayback || askingRef.current || endingRef.current || snapBusyRef.current) return;
+    if (mutedRef.current || duringPlayback || askingRef.current || endingRef.current || snapBusyRef.current) return;
     if (audioCaptureRef.current?.muted || audioPlaybackRef.current?.isActuallyPlaying?.()) return;
     const seconds = samples.length / 16000;
     if (seconds < 0.7 || seconds > 15) return;
@@ -3356,16 +3407,23 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       void ensureConnected({ silent: true }).catch(() => {});
     }
     let classification;
+    const classificationAbort = new AbortController();
+    classifyAbortRef.current?.abort();
+    classifyAbortRef.current = classificationAbort;
     try {
-      classification = await classifyUtterance(samples, { companionName: profileStore.data.companionName || "", book: book?.title || "" });
+      classification = await classifyUtterance(samples, { companionName: profileStore.data.companionName || "", book: book?.title || "", signal: classificationAbort.signal });
     } catch (error) {
+      if (error?.name === "AbortError" || mutedRef.current) return;
       console.warn("[AUTO] classify failed", error?.message || error);
       if (Date.now() - classifyNoticeAtRef.current > 30_000) {
         classifyNoticeAtRef.current = Date.now();
         notify("Voice check is temporarily unavailable. Say the companion's name again or tap the mic.", "info", 5000);
       }
       return;
+    } finally {
+      if (classifyAbortRef.current === classificationAbort) classifyAbortRef.current = null;
     }
+    if (mutedRef.current || endingRef.current) return;
     if (classification.reading) {
       readingModeRef.current = true;
       if (askingRef.current) endAskNow();
@@ -3378,7 +3436,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   async function openAskFromClip(samples) {
-    if (askingRef.current) return;
+    if (mutedRef.current || askingRef.current) return;
     readingModeRef.current = false;
     clearTimeout(warmTimerRef.current);
     askingRef.current = true;
@@ -3389,6 +3447,12 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     audioPlaybackRef.current?.clear();
     try {
       await ensureConnected();
+      if (mutedRef.current) {
+        askingRef.current = false;
+        questionInFlightRef.current = false;
+        setAsking(false);
+        return;
+      }
       const client = clientRef.current;
       for (let i = 0; i < 50 && client && !client.contextReady; i += 1) await new Promise((resolve) => setTimeout(resolve, 100));
       if (!client?.contextReady) throw new Error("voice_not_ready");
@@ -3416,12 +3480,13 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
       setHandsFree(false);
       return;
     }
-    if (muted || !audioCaptureRef.current?.stream) {
+    if (mutedRef.current || muted || !audioCaptureRef.current?.stream) {
       notify("Mic ready nahi hai. Mic permission check kijiye.", "error");
       return;
     }
     try {
       const { MicVAD } = await import("@ricky0123/vad-web");
+      const generation = vadGenerationRef.current;
       const vad = await MicVAD.new({
         model: "v5",
         baseAssetPath: "/vad/",
@@ -3430,7 +3495,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
         pauseStream: async () => {},
         resumeStream: async () => audioCaptureRef.current.stream,
         onSpeechStart: () => {
-          if (audioPlaybackRef.current?.isActuallyPlaying?.() || audioCaptureRef.current?.muted || snapBusyRef.current) return;
+          if (mutedRef.current || audioPlaybackRef.current?.isActuallyPlaying?.() || audioCaptureRef.current?.muted || snapBusyRef.current) return;
           clearTimeout(warmTimerRef.current);
           clientRef.current?.startAudio();
           micGateRef.current?.start();
@@ -3446,7 +3511,15 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
         },
         onVADMisfire: () => { micGateRef.current?.end(); setAsking(false); },
       });
+      if (mutedRef.current || generation !== vadGenerationRef.current) {
+        await vad.destroy();
+        return;
+      }
       await vad.start();
+      if (mutedRef.current || generation !== vadGenerationRef.current) {
+        await vad.destroy();
+        return;
+      }
       vadRef.current = vad;
       setHandsFree(true);
       notify("Hands-free on. Reading aloud can trigger a question; switch back to Tap to ask whenever you like.", "info");
@@ -3539,6 +3612,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
   function openSnapshotPicker() {
     triggerLightTap();
+    if (mutedRef.current) { notify("Unmute the microphone before sharing a page photo.", "info"); return; }
     if (snapBusy) return;
     if (!LEGACY_STREAMING && askingRef.current) endAskNow();
     if (LEGACY_STREAMING && !clientRef.current?.ready) {
@@ -3548,21 +3622,30 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
     snapFileRef.current?.click();
   }
   async function handleSnapshotFile(file) {
-    if (!file || snapBusyRef.current) return;
+    if (!file || snapBusyRef.current || mutedRef.current) return;
     try {
       const shot = await prepareSnapshot(file);
+      if (mutedRef.current) return;
       if (shot.quality === "blurry") notify("Photo thodi dhundhli lag rahi hai. Zaroorat ho toh dobara le lijiye.", "info", 5200);
       try {
+        pageVerificationAbortRef.current?.abort();
+        const verificationAbort = new AbortController();
+        pageVerificationAbortRef.current = verificationAbort;
         const response = await fetch(apiUrl("/api/reading/verify-page"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ image: shot.base64 }),
+          signal: verificationAbort.signal,
         });
         if (!response.ok) throw new Error(`page_verification_${response.status}`);
         shot.verification = parsePageVerificationResponse(await response.json());
       } catch {
+        if (mutedRef.current) return;
         shot.verification = { kind: "unverified", confidence: 0, printedPageNumber: null, language: "unknown", text: "", reason: "" };
+      } finally {
+        pageVerificationAbortRef.current = null;
       }
+      if (mutedRef.current) return;
       if (pageVerificationDecision(shot.verification) === "reject") {
         setRejectedShot({ message: rejectedPageMessage(shot.verification) });
         return;
@@ -3577,7 +3660,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   async function commitSnapshot(shot) {
-    if (!shot || snapBusy) return;
+    if (!shot || snapBusy || mutedRef.current) return;
     snapBusyRef.current = true;
     setSnapBusy(true);
     try {
@@ -3628,7 +3711,7 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   }
 
   async function startCameraThenNotify() {
-    if (!LEGACY_STREAMING) return;
+    if (!LEGACY_STREAMING || mutedRef.current) return;
     if (cameraOn || !videoEl.current) return;
     if (snapBase64Ref.current) {
       clearSnapshot();
@@ -3664,18 +3747,29 @@ function SessionScreen({ bookId, onEnd, onRestart, onUsageSecond, onDailyLimit }
   function stopCameraNow() { cameraRef.current?.stop(); cameraRef.current = null; setCameraOn(false); setCameraExpanded(false); }
   function toggleMute() {
     triggerLightTap();
-    const next = !muted;
-    setMuted(next);
-    audioCaptureRef.current?.setMuted(next);
-    if (!LEGACY_STREAMING && next) {
-      micGateRef.current?.end();
-      setAsking(false);
-    } else if (!LEGACY_STREAMING) {
-      micGateRef.current?.start();
-    }
+    const controller = sessionAudioMuteRef.current;
+    if (!controller) return;
+    if (controller.isUnmuting()) { controller.mute(); return; }
+    if (mutedRef.current) {
+      const mutedFor = muteStartedAtRef.current == null ? 0 : Date.now() - muteStartedAtRef.current;
+      unmuteClassRef.current = mutedFor >= 30_000 ? "cold" : "warm";
+      void controller.unmute({ warm: warmSessionAfterUnmute });
+    } else controller.mute();
   }
+  const onMuteShortcut = useEffectEvent(() => toggleMute());
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key.toLowerCase() !== "m" || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName) || event.target?.isContentEditable) return;
+      event.preventDefault();
+      onMuteShortcut();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   function toggleCamera() {
     triggerLightTap();
+    if (mutedRef.current) return;
     if (cameraOn) stopCameraNow();
     else startCameraThenNotify();
   }
@@ -4269,6 +4363,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
       },
       handlers: {
         onStatus: (s) => {
+          if (mutedRef.current) return;
           setStatus(!LEGACY_STREAMING && s === "connected" && !askingRef.current ? "Listening for your question" : s);
           if (!LEGACY_STREAMING && questionInFlightRef.current && (/^reconnecting/.test(s) || s === "switching to backup model")) {
             questionInFlightRef.current = false;
@@ -4281,7 +4376,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           }
         },
         onReady: async (connectionId) => {
-          if (LEGACY_STREAMING) return;
+          if (LEGACY_STREAMING || mutedRef.current) return;
           for (let attempt = 0; attempt < 3; attempt += 1) {
             const page = pageRef.current;
             if (page) {
@@ -4303,38 +4398,51 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
         },
         onNotice: (notice) => {
           questionInFlightRef.current = false;
-          audioCaptureRef.current?.setMuted(true);
-          micGateRef.current?.reset();
-          setAsking(false);
-          setMuted(true);
-          stopCameraNow();
-          audioPlaybackRef.current?.clear();
+          if (sessionAudioMuteRef.current) sessionAudioMuteRef.current.mute();
+          else {
+            mutedRef.current = true;
+            setMuted(true);
+            audioCaptureRef.current?.setMuted(true);
+            micGateRef.current?.reset();
+            stopCameraNow();
+            audioPlaybackRef.current?.clear();
+          }
           notifyPersistent({
             ...notice,
             action: {
               label: "Retry connection",
               onClick: () => {
                 endingRef.current = false;
-                setMuted(false);
-                audioCaptureRef.current?.setMuted(false);
-                clientRef.current?.retry();
+                void sessionAudioMuteRef.current?.unmute({ warm: () => clientRef.current?.retry() });
               },
             },
           });
         },
         onAudio: (data) => {
+          if (mutedRef.current) return;
           if (!LEGACY_STREAMING) clearOpeningMicFallback();
           if (!LEGACY_STREAMING && questionEndAtRef.current && !firstAudioLoggedRef.current) {
             firstAudioLoggedRef.current = true;
-            console.info("[READING_LATENCY] first audio after question", Math.round(performance.now() - questionEndAtRef.current), "ms");
+            const latencyMs = Math.round(performance.now() - questionEndAtRef.current);
+            console.info("[READING_LATENCY] first audio after question", latencyMs, "ms");
+            const kind = unmuteClassRef.current;
+            if (kind) {
+              const samples = [...unmuteLatencySamplesRef.current[kind], latencyMs].slice(-20);
+              unmuteLatencySamplesRef.current[kind] = samples;
+              const summary = summarizeLatencies(samples);
+              console.info(`[READING_LATENCY] ${kind} unmute p50/p95`, { count: summary.count, p50Ms: summary.p50, p95Ms: summary.p95 });
+              unmuteClassRef.current = null;
+            }
           }
           audioPlaybackRef.current?.enqueue(data);
         },
         onText: (text) => {
+          if (mutedRef.current) return;
           if (!LEGACY_STREAMING) clearOpeningMicFallback();
           companionTurnBufRef.current += text;
         },
         onUserText: (text) => {
+          if (mutedRef.current) return;
           userTurnBufRef.current += text;
           const intent = classifyVoiceIntent(text, profileStore.data.companionName || "");
           if (intent === "quiet") {
@@ -4365,6 +4473,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           }
         },
         onFirstReady: () => {
+          if (mutedRef.current) return;
           const opening = buildOpeningNote(contRef.current);
           if (LEGACY_STREAMING) {
             clientRef.current?.sendText(opening);
@@ -4386,6 +4495,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           });
         },
         onTurnComplete: () => {
+        if (mutedRef.current) return;
         clearOpeningMicFallback();
           questionInFlightRef.current = false;
         if (!LEGACY_STREAMING && !micGateRef.current?.active) micGateRef.current?.start();
@@ -4402,7 +4512,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
         }
       },
         onInterrupted: () => audioPlaybackRef.current?.clear(),
-        onToolCall: (tc) => handleToolCall(tc),
+        onToolCall: (tc) => { if (!mutedRef.current) handleToolCall(tc); },
       },
     });
 
@@ -4416,6 +4526,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
     );
     audioCaptureRef.current = new AudioCapture(
       (base64Pcm) => {
+        if (mutedRef.current) return;
         if (LEGACY_STREAMING) {
           const playingNow = audioPlaybackRef.current?.isActuallyPlaying?.() ?? speakingNowRef.current;
           const quiet = playingNow && micLevelRef.current < 0.2;
@@ -4434,25 +4545,50 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
         if (micLevelRef.current > 0.22 && !audioCaptureRef.current?.muted && (LEGACY_STREAMING || micGateRef.current?.active)) clientRef.current?.noteSpeech();
       },
       () => {
-        if (!vadRef.current) return;
-        void vadRef.current.destroy().catch((error) => console.warn("[VAD] cleanup failed", error));
-        vadRef.current = null;
-        micGateRef.current?.reset();
-        setHandsFree(false);
+        stopAutoListen();
+        askingRef.current = false;
         setAsking(false);
-        void startAutoListen();
+        if (!mutedRef.current) void startAutoListen();
       }
     );
+    sessionAudioMuteRef.current = new SessionAudioMute({
+      capture: audioCaptureRef.current,
+      live: clientRef.current,
+      micGate: micGateRef.current,
+      playback: audioPlaybackRef.current,
+      stopAutoListen,
+      stopCamera: stopCameraNow,
+      onMuted: (nextMuted) => {
+        if (nextMuted && !mutedRef.current) muteStartedAtRef.current = Date.now();
+        if (!nextMuted) muteStartedAtRef.current = null;
+        mutedRef.current = nextMuted;
+        setMuted(nextMuted);
+        if (nextMuted) {
+          askingRef.current = false;
+          questionInFlightRef.current = false;
+          clearTimeout(followTimerRef.current);
+          clearTimeout(quietModeTimerRef.current);
+          setAsking(false);
+          setStatus("Mic muted");
+        } else setStatus(clientRef.current?.ready ? "Listening for your question" : "Reconnecting…");
+      },
+      onStatus: (nextStatus, error) => {
+        if (error) console.warn("[VOICE] muted-session warm failed", error?.message || error);
+        setStatus(nextStatus === "reconnecting" ? "Reconnecting…" : nextStatus === "muted" ? "Mic muted" : nextStatus);
+      },
+      onError: (error) => notify(friendlyErrorMessage(error, "Microphone permission is needed to unmute."), "error"),
+    });
     const [conn, mic] = await Promise.allSettled([
       LEGACY_STREAMING ? clientRef.current.connect() : Promise.resolve(),
       audioCaptureRef.current.start(),
     ]);
-    if (mic.status === "rejected") setStatus(`Mic error: ${mic.reason?.message || mic.reason}`);
+    if (mutedRef.current) setStatus("Mic muted");
+    else if (mic.status === "rejected") setStatus(`Mic error: ${mic.reason?.message || mic.reason}`);
     else if (!LEGACY_STREAMING) {
       setStatus("Listening for your question");
       void ensureConnected({ silent: true }).catch(() => {});
     }
-    else if (conn.status === "rejected") {
+    else if (conn.status === "rejected" && !mutedRef.current) {
       console.warn("[LIVE] initial connection failed", String(conn.reason?.message || conn.reason).slice(0, 160));
       if (/all_keys_unavailable/.test(String(conn.reason?.message))) {
         setStatus("voice service busy - try again later");
@@ -4498,21 +4634,8 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
   useEffect(() => {
     chapterPathRef.current?.querySelector(".hud-node.current")?.scrollIntoView({ inline: "center", block: "nearest" });
   }, [chapterNumber]);
-    const statusKey = !LEGACY_STREAMING && asking && !/reconnect|resum|closed|lost|error|failed|busy|unavailable|offline/i.test(status) ? "listening"
-    : !LEGACY_STREAMING && /ready to ask|ready for the next question|listening for your question|quiet reading/i.test(status) ? "idle"
-    : !LEGACY_STREAMING && /thinking/i.test(status) ? "thinking"
-    : /reconnect|resum/i.test(status) ? "reconnecting"
-    : /connecting|starting/i.test(status) ? "connecting"
-    : /closed|lost|error|failed|busy|unavailable|offline/i.test(status) ? "lost" : "connected";
-  const statusMeta = {
-    connected: { label: LEGACY_STREAMING ? "Live" : "Voice ready", dotClass: "status-dot connected" },
-        idle: { label: profileStore.data.companionName ? `Always listening · say ${profileStore.data.companionName} or ask` : "Always listening · ask anytime", dotClass: "status-dot idle" },
-    listening: { label: "Listening", dotClass: "status-dot connected" },
-    thinking: { label: "Thinking", dotClass: "status-dot reconnecting" },
-    connecting: { label: "Getting ready", dotClass: "status-dot reconnecting" },
-    reconnecting: { label: "Reconnecting", dotClass: "status-dot reconnecting" },
-    lost: { label: "Offline", dotClass: "status-dot lost" },
-  }[statusKey];
+  const statusMeta = sessionStatusView({ muted, speaking, asking, status, legacy: LEGACY_STREAMING, companionName: profileStore.data.companionName });
+  statusMeta.dotClass = `status-dot ${statusMeta.key === "muted" || statusMeta.key === "offline" ? "lost" : statusMeta.key === "standby" ? "idle" : statusMeta.key === "listening" ? "connected" : "reconnecting"}`;
   const mode = orbVisual.orbMode;
   const liveNotice = describeLiveStatus(status);
   const fmt = (s) => {
@@ -4536,7 +4659,7 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
             </div>
             <div className="hud-jr-meta">
               <span className="hud-time"><Clock size={11} />{fmt(elapsed)}</span>
-              <span className="hud-live"><span className={statusMeta.dotClass} />{statusMeta.label}</span>
+              <span className="hud-live"><span className={statusMeta.dotClass} />{statusMeta.label}<button type="button" className="hud-status-info" aria-label="Explain listening status" onClick={() => setSessionInfoOpen(true)}><Info size={13} /></button></span>
             </div>
           </div>
           <div ref={chapterPathRef} className="hud-path" role="list" aria-label={`Chapter progress: ${chapterNumber} of ${totalChapters}, ${doneCount} done`}>
@@ -4621,9 +4744,16 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
       <input ref={snapFileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { handleSnapshotFile(e.target.files?.[0]); e.target.value = ""; }} />
 
       <div className="glass-dock">
-      <Motion.button className={`hud-btn ${LEGACY_STREAMING ? (muted ? "active" : "") : (asking ? "active" : "")}`} whileTap={{ scale: 0.94 }} transition={INTERACTION_SPRING} onClick={LEGACY_STREAMING ? toggleMute : toggleAsk} aria-label={LEGACY_STREAMING ? (muted ? "Unmute microphone" : "Mute microphone") : (asking ? "Stop asking" : "Ask a question")}>
-          {LEGACY_STREAMING && muted ? <MicOff size={22} /> : <Mic size={22} />}
-        </Motion.button>
+        {LEGACY_STREAMING ? (
+          <Motion.button className={`hud-btn ${muted ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? "Unmute microphone" : "Mute microphone"} title={muted ? "Unmute microphone" : "Mute microphone"}>
+            {muted ? <MicOff size={22} /> : <Mic size={22} />}
+          </Motion.button>
+        ) : (
+          <>
+            <Motion.button className={`hud-btn ${asking ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleAsk} aria-label={asking ? "Stop asking" : "Ask a question"} title={asking ? "Stop asking" : "Ask a question"}><Mic size={22} /></Motion.button>
+            <Motion.button className={`hud-btn mic-mute-btn ${muted ? "active" : ""}`} whileTap={reduceMotion ? undefined : { scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleMute} aria-pressed={muted} aria-label={muted ? "Unmute microphone" : "Mute microphone"} title={muted ? "Unmute microphone" : "Mute microphone"}>{muted ? <MicOff size={22} /> : <Mic size={22} />}</Motion.button>
+          </>
+        )}
         {LEGACY_STREAMING && <Motion.button className={`hud-btn ${cameraOn ? "active" : ""}`} whileTap={{ scale: 0.94 }} transition={INTERACTION_SPRING} onClick={toggleCamera} aria-label={cameraOn ? "Close camera" : "Open camera"}>
           {cameraOn ? <CameraIcon size={22} /> : <CameraOff size={22} />}
         </Motion.button>}
@@ -4656,6 +4786,25 @@ const recapLine = recap ? `\n\nRECENT CONVERSATION with this reader (earlier, fo
           {activities.length > 0 && <span className="sess-count">{activities.length}</span>}
         </div>
       </div>
+
+      <AnimatePresence>
+        {sessionInfoOpen && (
+          <Motion.div className="session-info-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSessionInfoOpen(false)}>
+            <Motion.section className="session-info-sheet" role="dialog" aria-modal="true" aria-labelledby="session-info-title" initial={reduceMotion ? false : { y: 30 }} animate={{ y: 0 }} exit={reduceMotion ? undefined : { y: 30 }} transition={INTERACTION_SPRING} onClick={(event) => event.stopPropagation()}>
+              <span className="session-info-grip" aria-hidden="true" />
+              <button type="button" className="session-info-close" aria-label="Close status details" onClick={() => setSessionInfoOpen(false)}><XIcon size={17} /></button>
+              <h2 id="session-info-title">Listening status</h2>
+              <dl>
+                <div><dt>Standby</dt><dd>Speech is checked for a direct question. A short detected clip may go to the voice classifier; the continuous mic stream is not sent.</dd></div>
+                <div><dt>Listening to you…</dt><dd>While Tap to ask is active, microphone audio goes to Gemini Live. A verified saved page may be sent as reading context.</dd></div>
+                <div><dt>Answering…</dt><dd>Gemini Live is returning the answer audio and transcript to this device.</dd></div>
+                <div><dt>Mic muted</dt><dd>Automatic microphone audio, camera frames, Live messages, and reconnects stop. An explicitly typed question still goes to the text-answer service with eligible saved page context; it never unmutes the mic.</dd></div>
+                <div><dt>Reconnecting…</dt><dd>The voice connection is warming or recovering. Speech is buffered briefly so the start of a question can be sent after it is ready.</dd></div>
+              </dl>
+            </Motion.section>
+          </Motion.div>
+        )}
+      </AnimatePresence>
 
       {createPortal(
         <AnimatePresence>
