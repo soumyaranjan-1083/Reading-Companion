@@ -10,6 +10,7 @@ import {
   parseAdminUserIds,
   quotaResponse,
   readerRankingResponse,
+  buildArenaRankingSets,
 } from "./readingQuota.js";
 
 test("admin ids are trimmed and case-insensitive", () => {
@@ -53,6 +54,28 @@ test("ranking response validates rows and marks the signed-in reader", () => {
   ]);
   assert.throws(() => readerRankingResponse([{ rank_position: 0, total_reading_seconds: -1 }], "abc"), /invalid_reader_rankings/);
   assert.throws(() => readerRankingResponse(null, "abc"), /invalid_reader_rankings/);
+});
+
+test("weekly Arena includes every all-time participant and orders zero readers by all-time rank", () => {
+  const allTime = [
+    { user_id: "user-a", reader_name: "Asha", rank_position: 1, total_reading_seconds: 600, arena_show_photo: false },
+    { user_id: "user-b", reader_name: "Ravi", rank_position: 2, total_reading_seconds: 300, arena_show_photo: false },
+    { user_id: "user-c", reader_name: "Noor", rank_position: 3, total_reading_seconds: 60, arena_show_photo: false },
+  ];
+  const weekly = [
+    { user_id: "user-c", reader_name: "Noor", rank_position: 1, total_reading_seconds: 120, arena_show_photo: false },
+    { user_id: "user-a", reader_name: "Asha", rank_position: 2, total_reading_seconds: 60, arena_show_photo: false },
+  ];
+  const sets = buildArenaRankingSets(allTime, weekly);
+  assert.deepEqual(sets.weekly.map((row) => [row.reader_name, row.rank_position, row.total_reading_seconds, row.all_time_rank]), [
+    ["Noor", 1, 120, 3], ["Asha", 2, 60, 1], ["Ravi", null, 0, 2],
+  ]);
+  const publicRows = readerRankingResponse(sets.weekly, "user-b");
+  assert.equal(publicRows[2].rank, null);
+  assert.equal(publicRows[2].totalSeconds, 0);
+  assert.equal(publicRows[2].allTimeRank, 2);
+  assert.equal(publicRows[1].allTimeSeconds, 600);
+  assert.equal(publicRows.some((row) => JSON.stringify(row).includes("user-")), false);
 });
 
 test("reader rankings preserve tied rank positions", () => {

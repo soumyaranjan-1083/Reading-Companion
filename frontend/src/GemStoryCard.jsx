@@ -1,27 +1,15 @@
 import { createElement, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion as Motion } from "framer-motion";
+import { motion as Motion } from "framer-motion";
 import { toPng } from "html-to-image";
-import { Check, ChevronUp, Dice5, Download, Share2, X as XIcon } from "lucide-react";
-import { useBackLayer } from "./backStack.js";
+import { Check, Dice5, Download, Image as ImageIcon, Share2, X as XIcon } from "lucide-react";
 import { GEM_TEMPLATES, loadGemTemplateFonts, templateById } from "./gemTemplates/index.js";
 import { ASPECT_SIZES } from "./gemTemplates/aspect.js";
 import { fitQuoteText } from "./gemTemplates/quoteFit.js";
+import { GEM_PALETTES, gemPaletteById } from "./gemTemplates/palettes.js";
 import { loadGemCardPreferences, saveGemCardPreferences } from "./gemTemplates/preferences.js";
 import "./GemStoryCard.css";
 
-const EFFECTS = [
-  { id: "noir", label: "Noir", swatch: "linear-gradient(135deg,#f2c48d,#1a1410)", accent: "#f2c48d" },
-  { id: "aurora", label: "Aurora", swatch: "linear-gradient(135deg,#8B5CF6,#22D3EE)", accent: "#c4b5fd" },
-  { id: "sunset", label: "Sunset", swatch: "linear-gradient(135deg,#fb923c,#e11d48)", accent: "#fdba74" },
-  { id: "ocean", label: "Ocean", swatch: "linear-gradient(135deg,#22d3ee,#1d4ed8)", accent: "#67e8f9" },
-  { id: "forest", label: "Forest", swatch: "linear-gradient(135deg,#86efac,#047857)", accent: "#86efac" },
-  { id: "rose", label: "Rose", swatch: "linear-gradient(135deg,#fda4af,#7c3aed)", accent: "#fda4af" },
-  { id: "mono", label: "Mono", swatch: "linear-gradient(135deg,#ffffff,#111111)", accent: "#ffffff" },
-  { id: "vintage", label: "Vintage", swatch: "linear-gradient(135deg,#e7c9a0,#6b4423)", accent: "#e7c9a0" },
-  { id: "neon", label: "Neon", swatch: "linear-gradient(135deg,#e879f9,#22d3ee)", accent: "#e879f9" },
-];
-const ASPECTS = Object.entries(ASPECT_SIZES).map(([id, value]) => ({ id, ...value }));
 const lazyTemplates = new Map();
 const previewCache = new Map();
 const exportCache = new Map();
@@ -45,22 +33,18 @@ function waitFrame() {
 
 export default function GemStoryCard({ gem, author, userInitials = "RC", onClose }) {
   const cardRef = useRef(null);
-  const effectButtonRef = useRef(null);
   const [preferences, setPreferences] = useState(loadGemCardPreferences);
-  const [effectOpen, setEffectOpen] = useState(false);
-  const [effectMenuPosition, setEffectMenuPosition] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [scale, setScale] = useState(0.3);
   const [failedImage, setFailedImage] = useState("");
   const [templatesReady, setTemplatesReady] = useState(false);
   const [previewResult, setPreviewResult] = useState(null);
-  useBackLayer(effectOpen, () => setEffectOpen(false));
-
-  const { template: templateId, accent: effectId, aspect } = preferences;
+  const { template: templateId, palette: paletteId, showArtwork } = preferences;
   const selectedTemplate = templateById(templateId);
-  const currentEffect = EFFECTS.find((item) => item.id === effectId) || EFFECTS[0];
-  const dimensions = ASPECT_SIZES[aspect] || ASPECT_SIZES["9:16"];
+  const palette = gemPaletteById(paletteId);
+  const aspect = "9:16";
+  const dimensions = ASPECT_SIZES[aspect];
   const quote = String(gem?.quote || "").trim();
   const image = gem?.sketch && typeof gem.sketch === "object" ? gem.sketch.dataUrl : null;
   const imageFailed = Boolean(image && failedImage === image);
@@ -71,7 +55,7 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(savedAt);
   const fileName = `${(gem?.bookTitle || "gem").replace(/\s+/g, "-").toLowerCase()}-story.png`;
   const imageKey = image ? `${image.length}:${image.slice(0, 40)}:${image.slice(Math.floor(image.length * 0.25), Math.floor(image.length * 0.25) + 16)}:${image.slice(Math.floor(image.length * 0.5), Math.floor(image.length * 0.5) + 16)}:${image.slice(-24)}` : "";
-  const renderKey = JSON.stringify([gem?.id, templateId, effectId, aspect, quote, gem?.bookTitle, author, gem?.chapterNumber, savedAtLabel, imageKey, imageFailed]);
+  const renderKey = JSON.stringify([gem?.id, templateId, paletteId, showArtwork, aspect, quote, gem?.bookTitle, author, gem?.chapterNumber, savedAtLabel, imageKey, imageFailed]);
   const previewUrl = previewCache.get(renderKey);
   const previewRaster = previewUrl ? { key: renderKey, url: previewUrl } : previewResult?.key === renderKey ? previewResult : null;
   const data = {
@@ -81,23 +65,28 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
     chapter: hasChapter ? gem.chapterNumber : null,
     savedAt: savedAtLabel,
     backgroundImage: image,
+    showArtwork,
+    supportsPhoto: selectedTemplate.supportsPhoto,
     userInitials,
     imageFailed,
     onImageError: () => setFailedImage(image || ""),
   };
-  const summitBaseSize = quote.length < 60 ? 92 : quote.length < 110 ? 80 : quote.length < 180 ? 68 : quote.length < 260 ? 58 : 50;
+  const summitBaseSize = quote.length < 60 ? 92 : quote.length < 110 ? 80 : quote.length < 180 ? 68 : 60;
   const summitFit = fitQuoteText(quote, {
     width: 840,
-    height: aspect === "1:1" ? 340 : aspect === "4:5" ? 490 : 660,
+    height: 660,
     maxFontSize: summitBaseSize,
-    minFontSize: 26,
+    minFontSize: 56,
   });
   const options = {
-    accent: selectedTemplate.supportsEffect === false ? selectedTemplate.defaultAccent : currentEffect.accent,
-    effectId,
+    accent: palette.accent,
+    palette,
+    showArtwork,
+    effectId: paletteId,
     aspect,
     height: dimensions.height,
     fitFontSize: summitFit.fontSize,
+    fitText: summitFit.text,
     cardRef,
   };
 
@@ -150,7 +139,7 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
       }
     }, 180);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [dimensions.height, dimensions.width, effectId, quote, renderKey, selectedTemplate, templatesReady, templateId]);
+  }, [dimensions.height, dimensions.width, paletteId, quote, renderKey, selectedTemplate, showArtwork, templatesReady, templateId]);
 
   function flash(text) {
     setMsg(text);
@@ -158,25 +147,13 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
   }
 
   function updatePreference(key, value) {
-    if (key === "template") setEffectOpen(false);
     setPreferences((current) => ({ ...current, [key]: value }));
-  }
-
-  function toggleEffectMenu() {
-    if (effectOpen) {
-      setEffectOpen(false);
-      return;
-    }
-    const bounds = effectButtonRef.current?.getBoundingClientRect();
-    if (!bounds) return;
-    setEffectMenuPosition({ left: Math.max(10, Math.min(bounds.left, window.innerWidth - 220)), bottom: window.innerHeight - bounds.top + 8 });
-    setEffectOpen(true);
   }
 
   function surpriseMe() {
     const template = GEM_TEMPLATES[Math.floor(Math.random() * GEM_TEMPLATES.length)];
-    const effect = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
-    setPreferences((current) => ({ ...current, template: template.id, accent: effect.id }));
+    const palette = GEM_PALETTES[Math.floor(Math.random() * GEM_PALETTES.length)];
+    setPreferences((current) => ({ ...current, template: template.id, palette: palette.id, showArtwork: template.supportsPhoto }));
   }
 
   async function renderExport() {
@@ -184,9 +161,7 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
     await loadGemTemplateFonts(selectedTemplate, quote);
     await document.fonts.ready;
     const base = { width: dimensions.width, height: dimensions.height, cacheBust: true, backgroundColor: "#07070b" };
-    const opts = { ...base, pixelRatio: 1 };
-    await toPng(cardRef.current, opts);
-    const url = await toPng(cardRef.current, opts);
+    const url = await toPng(cardRef.current, { ...base, pixelRatio: 1 });
     keepRecent(exportCache, renderKey, url, 2);
     return url;
   }
@@ -211,7 +186,11 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
       const url = await renderExport();
       const blob = await (await fetch(url)).blob();
       const file = new File([blob], fileName, { type: "image/png" });
-      if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: gem?.bookTitle || "Gem" });
+      if (navigator.canShare?.({ files: [file] })) await navigator.share({
+        files: [file],
+        title: gem?.bookTitle || "Reading Companion",
+        text: `${gem?.bookTitle || "A saved gem"}${author && author !== "Author unknown" ? ` by ${author}` : ""} · Reading Companion ${window.location.origin}`,
+      });
       else { saveFile(url); flash("Sharing not supported here - saved instead"); }
     } catch (error) {
       if (error?.name !== "AbortError") flash("Could not create the image");
@@ -222,9 +201,9 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
     <Motion.div className="gsc-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}>
       <div className="gsc-stage" style={{ width: dimensions.width * scale, height: dimensions.height * scale }}>
         <div className="gsc-scale" style={{ width: dimensions.width, height: dimensions.height, transform: `scale(${scale})` }}>
-          <Suspense fallback={<div className="gsc-loading-card" role="status">Loading template…</div>}>
+          {templatesReady ? <Suspense fallback={<div className="gsc-loading-card" role="status">Loading template…</div>}>
             <CardTemplate templateId={selectedTemplate.id} data={data} options={options} />
-          </Suspense>
+          </Suspense> : <div className="gsc-loading-card" role="status">Loading type and artwork…</div>}
           {previewRaster?.key === renderKey && <img className="gsc-preview-raster" src={previewRaster.url} alt="Rendered card preview" />}
         </div>
       </div>
@@ -234,18 +213,21 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
       <Motion.div className="gsc-dock" initial={{ y: 90, opacity: 0, scale: 0.96 }} animate={{ y: 0, opacity: 1, scale: 1 }} transition={{ type: "spring", stiffness: 260, damping: 24, delay: 0.15 }}>
         <section className="gsc-template-section" aria-label="Choose gem card template">
           <div className="gsc-picker-heading">
-            <div><b>Template</b><span>{selectedTemplate.description}</span></div>
-            <button type="button" className="gsc-surprise" onClick={surpriseMe} title="Pick a random template and color effect"><Dice5 size={15} /> Surprise me</button>
+            <div><b>{selectedTemplate.name}</b><span>{selectedTemplate.description}</span></div>
+            <button type="button" className="gsc-surprise" onClick={surpriseMe} title="Pick a random template and palette"><Dice5 size={15} /> Surprise me</button>
           </div>
           <div className="gsc-template-strip" role="listbox" aria-label="Gem card templates">
             {GEM_TEMPLATES.map((template) => {
               const miniHeight = Math.round(78 / (dimensions.width / dimensions.height));
               const previewData = { ...data, onImageError: undefined };
               const previewOptions = {
-                accent: template.supportsEffect === false ? template.defaultAccent : currentEffect.accent,
-                effectId,
+                accent: palette.accent,
+                effectId: paletteId,
+                palette,
                 aspect,
                 height: dimensions.height,
+                showArtwork,
+                supportsPhoto: template.supportsPhoto,
               };
               return (
                 <button type="button" role="option" aria-selected={template.id === templateId} className={`gsc-template-choice${template.id === templateId ? " on" : ""}`} key={template.id} onClick={() => updatePreference("template", template.id)} title={template.description}>
@@ -260,48 +242,21 @@ export default function GemStoryCard({ gem, author, userInitials = "RC", onClose
               );
             })}
           </div>
+          <div className="gsc-palette-row" role="radiogroup" aria-label="Card palette">
+            {GEM_PALETTES.map((item) => <button type="button" key={item.id} role="radio" aria-checked={paletteId === item.id} aria-label={`${item.name} palette`} title={item.name} className={`gsc-palette-swatch${paletteId === item.id ? " on" : ""}`} onClick={() => updatePreference("palette", item.id)} style={{ background: `linear-gradient(145deg, ${item.stops.join(", ")})`, "--swatch-accent": item.accent }}><i /></button>)}
+          </div>
         </section>
 
         <div className="gsc-control-row">
-          <div className="gsc-control-group">
-            <span className="gsc-control-label">Color effect</span>
-            <div className="gsc-menu-wrap">
-              <button ref={effectButtonRef} type="button" className="gsc-btn gsc-effect-btn" onClick={toggleEffectMenu} disabled={selectedTemplate.supportsEffect === false} title={selectedTemplate.supportsEffect === false ? "Neon Terminal uses its fixed cyan and green palette" : "Change the template accent color"}>
-                <span className="gsc-swatch" style={{ background: selectedTemplate.supportsEffect === false ? selectedTemplate.defaultAccent : currentEffect.swatch }} />
-                <span>{selectedTemplate.supportsEffect === false ? "Fixed" : currentEffect.label}</span>
-                <ChevronUp size={14} style={{ transform: effectOpen ? "rotate(180deg)" : "none" }} />
-              </button>
-            </div>
-          </div>
-
-          <div className="gsc-control-group">
-            <span className="gsc-control-label">Aspect ratio</span>
-            <div className="gsc-aspect-toggle" role="group" aria-label="Export aspect ratio">
-              {ASPECTS.map((item) => <button type="button" key={item.id} className={aspect === item.id ? "on" : ""} aria-label={`${item.label}, ${item.id}`} aria-pressed={aspect === item.id} onClick={() => updatePreference("aspect", item.id)}><b>{item.label}</b><small>{item.id}</small></button>)}
-            </div>
-          </div>
+          {selectedTemplate.supportsPhoto && <label className="gsc-artwork-toggle"><input type="checkbox" checked={showArtwork} onChange={(event) => updatePreference("showArtwork", event.target.checked)} /><ImageIcon size={15} /><span>Show artwork</span></label>}
 
           <div className="gsc-actions">
-            <button type="button" className="gsc-btn icon" onClick={share} disabled={busy} aria-label="Share card" title="Share"><Share2 size={17} /></button>
+            <button type="button" className="gsc-btn share" onClick={share} disabled={busy} aria-label="Share card" title="Share"><Share2 size={16} /><span>Share</span></button>
             <button type="button" className="gsc-btn primary" onClick={download} disabled={busy}><Download size={17} /><span>{busy ? "Saving…" : "Download"}</span></button>
             <button type="button" className="gsc-btn icon" onClick={onClose} aria-label="Close" title="Close"><XIcon size={17} /></button>
           </div>
         </div>
       </Motion.div>
-      {createPortal(
-        <AnimatePresence>
-          {effectOpen && selectedTemplate.supportsEffect !== false && effectMenuPosition && (
-            <Motion.div className="gsc-menu gsc-effect-menu" style={effectMenuPosition} initial={{ opacity: 0, y: 8, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.97 }} transition={{ duration: 0.16 }}>
-              {EFFECTS.map((effect) => (
-                <button type="button" key={effect.id} className={`gsc-opt ${effect.id === effectId ? "on" : ""}`} onClick={() => { updatePreference("accent", effect.id); setEffectOpen(false); }}>
-                  <span className="gsc-swatch" style={{ background: effect.swatch }} /><span className="gsc-opt-label">{effect.label}</span>{effect.id === effectId && <Check size={15} />}
-                </button>
-              ))}
-            </Motion.div>
-          )}
-        </AnimatePresence>,
-        document.body,
-      )}
     </Motion.div>,
     document.body,
   );

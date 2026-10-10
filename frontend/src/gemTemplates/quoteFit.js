@@ -58,12 +58,25 @@ export function fitQuoteText(value, {
   const key = JSON.stringify([text, width, height, maxFontSize, minFontSize, step, lineHeight]);
   if (measureText === fallbackMeasure && fitCache.has(key)) return fitCache.get(key);
   const paragraphs = text.split(/\r?\n/u);
-  let best = { text, fontSize: minFontSize, lines: paragraphs, height: Infinity };
+  let best = null;
   for (let fontSize = maxFontSize; fontSize >= minFontSize; fontSize -= step) {
     const lines = paragraphs.flatMap((paragraph) => wrapParagraph(paragraph, width, fontSize, measureText));
     const measuredHeight = lines.length * fontSize * lineHeight;
-    best = { text: lines.join("\n"), fontSize, lines, height: measuredHeight };
+    best = { text: lines.join("\n"), fontSize, lines, height: measuredHeight, truncated: false };
     if (measuredHeight <= height) break;
+  }
+  if (!best) {
+    const lines = paragraphs.flatMap((paragraph) => wrapParagraph(paragraph, width, minFontSize, measureText));
+    best = { text: lines.join("\n"), fontSize: minFontSize, lines, height: lines.length * minFontSize * lineHeight, truncated: false };
+  }
+  if (best.height > height) {
+    const maxLines = Math.max(1, Math.floor(height / (minFontSize * lineHeight)));
+    const lines = best.lines.slice(0, maxLines);
+    let last = lines.pop() || "";
+    const parts = graphemes(last);
+    while (parts.length && measureText(`${parts.join("")}…`, minFontSize) > width) parts.pop();
+    lines.push(`${parts.join("")}…`);
+    best = { text: lines.join("\n"), fontSize: minFontSize, lines, height: lines.length * minFontSize * lineHeight, truncated: true };
   }
   if (measureText === fallbackMeasure) {
     fitCache.set(key, best);

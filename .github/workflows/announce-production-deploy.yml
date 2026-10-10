@@ -1,51 +1,140 @@
 name: Announce production update
 
-'on':
+on:
+  # Fires when Vercel reports a finished deployment.
   deployment_status:
+  # Manual run from the Actions tab (use "dry run" to preview the payload).
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: print the notification payload without sending it"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One announcement at a time, never cancel one that is already sending.
+concurrency:
+  group: announce-production
+  cancel-in-progress: false
+
 jobs:
   announce:
+    # Vercel sets `deployment.ref` to a commit SHA, not a branch name, so we
+    # do not filter on it. The Production environment only deploys `main`,
+    # and Preview deployments use the "Preview" environment, so they are skipped.
     if: >-
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment.ref == 'main' &&
-      (github.event.deployment.environment == 'production' || github.event.deployment.environment == 'Production')
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.deployment_status.state == 'success' &&
+        (github.event.deployment.environment == 'Production' || github.event.deployment.environment == 'production')
+      )
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.deployment.sha }}
+          ref: ${{ github.event.deployment.sha || github.sha }}
+          fetch-depth: 2
+
       - name: Prepare release announcement
         id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          # Set to 'true' to announce only when frontend/package.json version
+          # changed compared with the previous commit on main (skips hotfix
+          # deploys). Manual runs always announce.
+          ONLY_ON_VERSION_CHANGE: 'false'
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync, readFileSync } from 'node:fs';
+          import { execSync } from 'node:child_process';
+
+          const out = (key, value) =>
+            appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${value}\n`);
 
           const pkg = JSON.parse(readFileSync('frontend/package.json', 'utf8'));
           const notes = JSON.parse(readFileSync('frontend/public/release-notes.json', 'utf8'));
           const release = (notes.releases || []).find((item) => item.version === pkg.version);
-          const changes = (release?.items || []).slice(0, 3).map((item) => item.text).join('; ');
+
+          if (!release) {
+            console.log(`::warning::No release-notes.json entry found for version ${pkg.version}. Sending a generic message.`);
+          }
+
+          if (
+            process.env.ONLY_ON_VERSION_CHANGE === 'true' &&
+            process.env.EVENT_NAME !== 'workflow_dispatch'
+          ) {
+            let previous = null;
+            try {
+              previous = JSON.parse(
+                execSync('git show HEAD^1:frontend/package.json', {
+                  encoding: 'utf8',
+                  stdio: ['ignore', 'pipe', 'ignore'],
+                }),
+              ).version;
+            } catch {
+              previous = null;
+            }
+            if (previous === pkg.version) {
+              console.log(`Version ${pkg.version} did not change since the previous commit. Skipping announcement.`);
+              out('skip', 'true');
+              process.exit(0);
+            }
+          }
+
+          const changes = (release?.items || [])
+            .slice(0, 3)
+            .map((item) => item.text)
+            .join('; ');
+
+          const body =
+            [release?.title, changes].filter(Boolean).join(': ').slice(0, 240) ||
+            'Open the app to get the latest update.';
+
           const payload = {
             title: `Reading Companion v${pkg.version} is live`,
-            body: [release?.title, changes].filter(Boolean).join(': ').slice(0, 240),
+            body,
             url: '/',
             tag: `release-${pkg.version}`,
           };
-          appendFileSync(process.env.GITHUB_OUTPUT, `payload=${JSON.stringify(payload)}\n`);
+
+          out('skip', 'false');
+          out('payload', JSON.stringify(payload));
           NODE
+
       - name: Send announcement to opted-in readers
+        if: steps.release.outputs.skip != 'true'
         env:
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
           PAYLOAD: ${{ steps.release.outputs.payload }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
+          {
+            echo "### Push announcement"
+            echo '```json'
+            echo "$PAYLOAD"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run enabled. Nothing was sent."
+            echo "$PAYLOAD"
+            exit 0
+          fi
+
           if [[ -z "$ADMIN_TOKEN" ]]; then
             echo "::error::Configure the ADMIN_TOKEN repository secret to enable production push announcements."
             exit 1
           fi
+
+          # The free Render instance may be asleep, so allow a long first
+          # response and retry on transient failures.
           curl --fail-with-body --silent --show-error \
+            --max-time 120 --retry 3 --retry-delay 15 --retry-all-errors \
             -X POST "https://reading-companion-l5ek.onrender.com/api/push/send" \
             -H "Content-Type: application/json" \
             -H "x-admin-token: $ADMIN_TOKEN" \
             --data "$PAYLOAD"
+          echo

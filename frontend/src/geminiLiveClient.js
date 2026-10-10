@@ -22,6 +22,7 @@ export class GeminiLiveClient {
     this.resumptionAt = 0;
     this.connectionRetries = 0;
     this.stopped = false;
+    this.paused = false;
     this.goAwayTimer = null;
     this.setupTimer = null;
     this.setupDone = false;
@@ -65,6 +66,7 @@ export class GeminiLiveClient {
   }
 
   async connect(existingHandle = null) {
+    if (this.stopped || this.paused) return;
     this.setupDone = false;
     this.ready = false;
     if (this.resumptionAt && Date.now() - this.resumptionAt >= 2 * 60 * 60 * 1000) {
@@ -94,6 +96,10 @@ export class GeminiLiveClient {
       reason: this.pendingFailedReason,
       leaseId: this.leaseId,
     });
+    if (this.stopped || this.paused || gen !== this.gen) {
+      await this.park();
+      return;
+    }
     this.keyCount = tokenInfo.keyCount || 1;
     this.activeKeyIndex = tokenInfo.keyIndex;
     this.activeKeyDay = tokenInfo.deviceDay;
@@ -110,13 +116,13 @@ export class GeminiLiveClient {
             onopen: () => {},
             onmessage: (message) => { if (gen === this.gen) this._handleMessage(message); },
             onerror: (e) => {
-              if (gen !== this.gen) return;
+              if (gen !== this.gen || this.paused) return;
               console.warn("[LIVE] error", e);
               this._rememberFailedKey(e);
               this._handleTransportError(e);
             },
             onclose: (e) => {
-              if (gen !== this.gen) return;
+              if (gen !== this.gen || this.paused) return;
               console.info("[LIVE] closed", e?.code, failureSummary(e));
               this._rememberFailedKey(e);
               this.handlers.onStatus?.("reconnecting (connection ended)");
@@ -145,8 +151,9 @@ export class GeminiLiveClient {
 
     if (!session) throw connectionError || new Error("Gemini Live connection failed");
 
-    if (this.stopped || gen !== this.gen) {
+    if (this.stopped || this.paused || gen !== this.gen) {
       try { session.close(); } catch { /* already closed */ }
+      if (this.paused && !this.stopped) await this.park();
       return;
     }
     this.session = session;
@@ -161,7 +168,7 @@ export class GeminiLiveClient {
   }
 
   async _maybeReady() {
-    if (!this.session || !this.setupDone || this.ready) return;
+    if (this.paused || !this.session || !this.setupDone || this.ready) return;
     this.ready = true;
     this.contextReady = false;
     this.connectionId += 1;
@@ -228,6 +235,7 @@ export class GeminiLiveClient {
   }
 
   _handleMessage(message) {
+    if (this.paused) return;
     this.lastServerAt = Date.now();   // any server message = the link is alive
     const scn = message.serverContent;
     if (message.data || scn?.outputTranscription?.text || scn?.turnComplete || message.toolCall) {
@@ -327,7 +335,7 @@ export class GeminiLiveClient {
   }
 
   _watch() {
-    if (this.stopped || this.reconnecting || !this.ready || !this.session) return;
+    if (this.stopped || this.paused || this.reconnecting || !this.ready || !this.session) return;
     const now = Date.now();
     const userRecent = this.lastUserTextAt || this.lastLoudAt || 0;
     const recentSpeech = this.lastLoudAt && now - this.lastLoudAt < WATCH_LOUD_MS;
@@ -371,7 +379,7 @@ export class GeminiLiveClient {
 
   // One reconnect loop at a time. Everything else is dropped while it runs.
   async _handleTransportError(e) {
-    if (this.stopped || this.reconnecting) return;
+    if (this.stopped || this.paused || this.reconnecting) return;
     const now = Date.now();
     if (this.lastReconnectAt && now - this.lastReconnectAt < 2500) return;
     this.lastReconnectAt = now;
@@ -390,10 +398,10 @@ export class GeminiLiveClient {
       }
       let attempt = 0;
       let lastError = e;
-      while (!this.stopped && attempt < RECOVERY_BACKOFF_MS.length) {
+      while (!this.stopped && !this.paused && attempt < RECOVERY_BACKOFF_MS.length) {
         this.handlers.onStatus?.(`reconnecting (${attempt + 1}/${RECOVERY_BACKOFF_MS.length})`);
         await this._wait(RECOVERY_BACKOFF_MS[attempt]);
-        if (this.stopped) return;
+        if (this.stopped || this.paused) return;
         try {
           await this.close({ keepHandle: true });
           await this.connect(this.resumptionHandle);
@@ -420,7 +428,7 @@ export class GeminiLiveClient {
     const request = { ...args, leaseId: args.leaseId || this.leaseId };
     let reportPending = Boolean(request.failedKeyIndex);
     let transientAttempt = 0;
-    while (!this.stopped) {
+    while (!this.stopped && !this.paused) {
       try {
         const info = await mintLiveToken(request);
         this.leaseId = info.leaseId || this.leaseId;
@@ -461,7 +469,7 @@ export class GeminiLiveClient {
   }
 
   async sendAudio(base64Pcm) {
-    if (this.stopped) return;
+    if (this.stopped || this.paused) return;
     if (!this.ready || !this.contextReady || !this.session) {
       this.audioBacklog.push(base64Pcm);
       if (this.audioBacklog.length > 3000) {
@@ -477,7 +485,7 @@ export class GeminiLiveClient {
   _queueAudio(input) {
     const session = this.session;
     this.audioSendChain = this.audioSendChain.then(async () => {
-      if (!this.ready || this.session !== session) return;
+      if (!this.ready || this.paused || this.session !== session) return;
       try {
         await session.sendRealtimeInput(input);
         if (input.audio) this.stats.sent += 1;
@@ -495,7 +503,7 @@ export class GeminiLiveClient {
   }
 
   startAudio() {
-    if (this.stopped || !this.baseConfig.realtimeInputConfig?.automaticActivityDetection?.disabled) return;
+    if (this.stopped || this.paused || !this.baseConfig.realtimeInputConfig?.automaticActivityDetection?.disabled) return;
     this.pendingAudioStart = true;
     this.pendingAudioEnd = false;
     if (this.contextReady) this._sendAudioStart();
@@ -508,22 +516,22 @@ export class GeminiLiveClient {
   }
 
   async sendVideoFrame(base64Jpeg) {
-    if (this.stopped || !this.ready || !this.session) throw new Error("voice_session_not_ready");
+    if (this.stopped || this.paused || !this.ready || !this.session) throw new Error("voice_session_not_ready");
     await this.session.sendRealtimeInput({ video: { data: base64Jpeg, mimeType: "image/jpeg" } });
   }
 
   async sendText(text) {
-    if (this.stopped || !this.ready || !this.session) return;
+    if (this.stopped || this.paused || !this.ready || !this.session) return;
     try { await this.session.sendRealtimeInput({ text }); } catch { /* reconnect gap */ }
   }
 
   async sendUserText(text) {
-    if (this.stopped || !this.ready || !this.session) throw new Error("voice_session_not_ready");
+    if (this.stopped || this.paused || !this.ready || !this.session) throw new Error("voice_session_not_ready");
     await this.session.sendRealtimeInput({ text });
   }
 
   async sendSilentContext(text) {
-    if (!this.session || !this.ready) throw new Error("voice_session_not_ready");
+    if (this.stopped || this.paused || !this.session || !this.ready) throw new Error("voice_session_not_ready");
     await this.session.sendClientContent({
       turns: [{ role: "user", parts: [{ text }] }],
       turnComplete: false,
@@ -531,7 +539,7 @@ export class GeminiLiveClient {
   }
 
   endAudio() {
-    if (this.stopped) return;
+    if (this.stopped || this.paused) return;
     if (!this.contextReady || !this.session) {
       this.pendingAudioEnd = true;
       return;
@@ -545,13 +553,13 @@ export class GeminiLiveClient {
   // Context-only note: any spoken reply the model produces to it is dropped
   // until that turn completes, the reader speaks, or the hold window ends.
   async sendQuietNote(text, holdMs = 8000) {
-    if (this.stopped || !this.ready || !this.session) return;
+    if (this.stopped || this.paused || !this.ready || !this.session) return;
     this.quietUntil = Date.now() + holdMs;
     await this.sendText(text);
   }
 
   async sendToolResponse(functionResponses) {
-    if (!this.session) return;
+    if (this.stopped || this.paused || !this.session) return;
     this.pendingTool = false;
     try {
       await this.session.sendToolResponse({ functionResponses });
@@ -588,5 +596,41 @@ export class GeminiLiveClient {
     await this.close({ keepHandle: true });
     releaseLiveLease(this.leaseId);
     this.leaseId = "";
+  }
+
+  cancelResponse() {
+    const session = this.session;
+    if (!session || !this.ready || this.paused) return;
+    this.audioBacklog = [];
+    this.pendingAudioStart = false;
+    this.pendingAudioEnd = false;
+    const activityDetectionDisabled = this.baseConfig.realtimeInputConfig?.automaticActivityDetection?.disabled;
+    void Promise.resolve(session.sendRealtimeInput(activityDetectionDisabled ? { activityEnd: {} } : { audioStreamEnd: true })).catch(() => {});
+  }
+
+  pause() {
+    if (this.stopped || this.paused) return;
+    this.paused = true;
+    this._cancelWait();
+    clearInterval(this.watchTimer);
+    this.watchTimer = null;
+    clearTimeout(this.goAwayTimer);
+    clearTimeout(this.setupTimer);
+    this.audioBacklog = [];
+    this.pendingAudioStart = false;
+    this.pendingAudioEnd = false;
+    if (!this.ready) {
+      try { this.session?.close(); } catch { /* already closed */ }
+      this.session = null;
+      this.setupDone = false;
+      this.contextReady = false;
+    }
+  }
+
+  resume() {
+    if (this.stopped || !this.paused) return false;
+    this.paused = false;
+    if (this.ready && !this.watchTimer) this.watchTimer = setInterval(() => this._watch(), 3000);
+    return true;
   }
 }

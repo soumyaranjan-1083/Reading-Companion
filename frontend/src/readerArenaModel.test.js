@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { formatDuration, getArenaAvatarUrl, getArenaMotionSettings, getArenaPlaceMessage, getArenaRosterLayout, getArenaRowClassName, getTieMark, initials, readerAccessibleLabel } from "./readerArenaModel.js";
+import { buildArenaProfile, buildWeeklyArenaData, formatDuration, getArenaAvatarUrl, getArenaGapText, getArenaMotionSettings, getArenaPlaceMessage, getArenaRosterLayout, getArenaRowClassName, getTieMark, initials, readerAccessibleLabel } from "./readerArenaModel.js";
 
 const roster = (count) => Array.from({ length: count }, (_, index) => ({
   rank: index + 1,
@@ -66,4 +67,54 @@ test("ties display the same rank with a tie marker and the current reader row is
 test("reduced motion removes rise, count-up, and idle effects", () => {
   assert.deepEqual(getArenaMotionSettings(true), { rise: false, countUp: false, idle: false, fadeDuration: 0.12 });
   assert.equal(getArenaMotionSettings(false).rise, true);
+});
+
+test("weekly roster shows raced readers first and zero-time readers in all-time order", () => {
+  const data = buildWeeklyArenaData([
+    { rank: 2, weeklyRank: 2, weeklySeconds: 60, allTimeRank: 1, name: "Asha" },
+    { rank: 1, weeklyRank: 1, weeklySeconds: 120, allTimeRank: 3, name: "Noor" },
+    { rank: null, weeklyRank: null, weeklySeconds: 0, allTimeRank: 2, name: "Ravi" },
+  ]);
+  assert.equal(data.racedCount, 2);
+  assert.deepEqual(data.raced.map((reader) => reader.name), ["Asha", "Noor"]);
+  assert.deepEqual(data.notStarted.map((reader) => [reader.name, reader.totalSeconds, reader.rank]), [["Ravi", 0, null]]);
+  assert.equal(readerAccessibleLabel(data.notStarted[0]), "Ravi, has not started this week, 0s");
+  assert.doesNotMatch(getArenaRowClassName(data.notStarted[0]), /top-ten/);
+});
+
+test("Arena roster model handles both periods at 0, 1, 2, 3, 10, and 100 readers", () => {
+  for (const count of [0, 1, 2, 3, 10, 100]) {
+    const allTime = Array.from({ length: count }, (_, index) => ({ ...roster(count)[index], allTimeRank: index + 1, allTimeSeconds: 3600 - index * 10 }));
+    const weekly = allTime.map((reader, index) => ({ ...reader, weeklyRank: index < Math.ceil(count / 2) ? index + 1 : null, weeklySeconds: index < Math.ceil(count / 2) ? (count - index) * 60 : 0 }));
+    const data = buildWeeklyArenaData(weekly);
+    assert.equal(data.raced.length + data.notStarted.length, count);
+    assert.equal(getArenaRosterLayout(allTime).podium.length, Math.min(count, 3));
+    assert.equal(getArenaRosterLayout(data.raced).rows.length, Math.max(0, data.raced.length - 3));
+  }
+});
+
+test("podium gap labels explain the lead and deficit", () => {
+  const leader = { rank: 1, totalSeconds: 720 };
+  const runnerUp = { rank: 2, totalSeconds: 360 };
+  assert.equal(getArenaGapText(leader, leader, runnerUp), "+6m ahead");
+  assert.equal(getArenaGapText(runnerUp, leader, runnerUp), "6m behind #1");
+});
+
+test("profile view model contains only public aggregates and compares with the viewer", () => {
+  const reader = { name: "Rinky", rank: 2, weeklyRank: 2, weeklySeconds: 300, allTimeRank: 5, allTimeSeconds: 1800, email: "private@example.com", uid: "private-uid" };
+  const viewer = { isYou: true, weeklySeconds: 660, allTimeSeconds: 2400 };
+  const profile = buildArenaProfile(reader, viewer, "weekly");
+  assert.equal(profile.comparison, "You are 6m ahead of Rinky");
+  assert.deepEqual(Object.keys(profile).sort(), ["allTimeRank", "allTimeSeconds", "avatarUrl", "comparison", "name", "weeklyRank", "weeklySeconds"].sort());
+  assert.equal(JSON.stringify(profile).includes("private@example.com"), false);
+  assert.equal(JSON.stringify(profile).includes("private-uid"), false);
+});
+
+test("profile sheet stays above bottom navigation and honors reduced motion", () => {
+  const css = readFileSync(new URL("./ReaderArena.css", import.meta.url), "utf8");
+  const component = readFileSync(new URL("./ReaderArena.jsx", import.meta.url), "utf8");
+  assert.match(css, /\.arena-sheet-overlay\s*\{[^}]*var\(--bottom-nav-h/);
+  assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(component, /role="dialog"\s+aria-modal="true"/);
+  assert.doesNotMatch(component, /selectedReader\.(?:email|uid|userId)/);
 });

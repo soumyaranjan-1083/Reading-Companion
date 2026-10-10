@@ -29,3 +29,16 @@ test("does not retry a non-transient classifier response", async () => {
   await assert.rejects(classifyUtterance(new Float32Array([0.1])), /classify_400/);
   assert.equal(calls, 1);
 });
+
+test("an aborted classifier request stops immediately without retrying", async () => {
+  let calls = 0;
+  globalThis.fetch = (_url, options) => {
+    calls += 1;
+    return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+  };
+  const controller = new AbortController();
+  const request = classifyUtterance(new Float32Array([0.1]), { signal: controller.signal });
+  controller.abort(new DOMException("Muted", "AbortError"));
+  await assert.rejects(request, { name: "AbortError" });
+  assert.equal(calls, 1);
+});
