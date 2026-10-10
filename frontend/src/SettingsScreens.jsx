@@ -28,7 +28,8 @@ import { ReportDetail, ReportList } from "./ReportsView.jsx";
 import "./SettingsScreens.css";
 import { useHaptic } from "./useHaptic.js";
 import { APP_VERSION } from "./version.js";
-import { CONTACT } from "./developerContact.js";
+import { openContactEmail } from "./developerContact.js";
+import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuota.js";
 
 export { APP_VERSION };
 const VOICES = ["Leda", "Aoede", "Kore", "Despina", "Erinome", "Sulafat", "Achernar", "Charon", "Orus"];
@@ -265,11 +266,11 @@ export function SettingsScreen({ nav, stores }) {
   const [pushPrefs, setPushPrefs] = useState(loadPushPrefs);
   const [pushBusy, setPushBusy] = useState(false);
   const [pushError, setPushError] = useState("");
+  const [arenaPhotoVisible, setArenaPhotoVisible] = useState(true);
+  const [arenaPhotoBusy, setArenaPhotoBusy] = useState(false);
+  const [arenaPhotoError, setArenaPhotoError] = useState("");
   const [deletedBooks, setDeletedBooks] = useState(() => library.listDeletedBooks());
   const [deletedBooksOpen, setDeletedBooksOpen] = useState(false);
-  const [quotaUserId, setQuotaUserId] = useState("");
-  const [quotaMinutes, setQuotaMinutes] = useState("30");
-  const [quotaSaving, setQuotaSaving] = useState(false);
   const [studyPattern] = useState(() => computeStudyPattern(collectSessionStarts(library)));
   const { triggerLightTap } = useHaptic();
   const drv = useGeminiVoiceDriver({ voiceName: voice });
@@ -285,6 +286,34 @@ export function SettingsScreen({ nav, stores }) {
     window.addEventListener("rc:local-data-changed", refresh);
     return () => window.removeEventListener("rc:local-data-changed", refresh);
   }, [library]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!nav.userId) return undefined;
+    fetchArenaPhotoPreference().then(({ showPhoto }) => {
+      if (!cancelled) {
+        setArenaPhotoVisible(showPhoto !== false);
+        setArenaPhotoError("");
+      }
+    }).catch(() => {
+      if (!cancelled) setArenaPhotoError("Arena photo privacy setting could not be loaded.");
+    });
+    return () => { cancelled = true; };
+  }, [nav.userId]);
+
+  async function updateArenaPhotoPreference(showPhoto) {
+    const previous = arenaPhotoVisible;
+    setArenaPhotoVisible(showPhoto);
+    setArenaPhotoBusy(true);
+    setArenaPhotoError("");
+    try {
+      await setArenaPhotoVisibility(showPhoto);
+    } catch {
+      setArenaPhotoVisible(previous);
+      setArenaPhotoError("Could not save the Arena photo setting. Try again.");
+    } finally {
+      setArenaPhotoBusy(false);
+    }
+  }
   function restoreBook(book) {
     const related = library.restoreBook(book.id);
     if (!related) return;
@@ -539,8 +568,12 @@ export function SettingsScreen({ nav, stores }) {
         <SetSec title="Privacy & storage">
           <div className="set-card">
             <div className="set-note"><Shield size={16} />
-              <span>Your books, gems, words and memories are stored only on this device. During a session your voice, camera frames and page snapshots are sent to Google Gemini to generate replies, and nowhere else.</span>
+              <span>Your books, gems, words and memories stay on this device and in your private account snapshot when sync is enabled. If Arena photo sharing is on, your cropped profile photo is stored in a private bucket and shown to signed-in Arena readers with an expiring link. During a session your voice, camera frames and page snapshots are sent to Google Gemini to generate replies.</span>
             </div>
+            <div className="set-rows">
+              <SetSwitchRow icon={<ImagePlus size={16} />} label="Show my photo in the Arena" hint="Other signed-in readers see your photo. Turn this off to show initials instead." checked={arenaPhotoVisible} disabled={!nav.userId || arenaPhotoBusy} onChange={updateArenaPhotoPreference} />
+            </div>
+            {arenaPhotoError && <small className="set-hint set-push-error" role="alert">{arenaPhotoError}</small>}
             <div className="set-meter">
               <div className="set-meter-top"><b><HardDrive size={14} style={{ verticalAlign: "-2px" }} /> Storage used</b><span>{kb} KB on this device</span></div>
               <div className="set-bar"><i style={{ width: `${Math.max(usedPct, 3)}%` }} /></div>
@@ -571,33 +604,14 @@ export function SettingsScreen({ nav, stores }) {
               </span>
             </div>
             {nav.quotaError && <button type="button" className="st-btn" onClick={() => void nav.refreshReadingQuota?.().catch((error) => flash(error.message))}>Retry limit check</button>}
-            <a className="st-btn" href={`mailto:${CONTACT.email}?subject=${encodeURIComponent("Reading Companion daily session limit")}`}>
+            <button type="button" className="st-btn" onClick={() => openContactEmail({
+              subject: "Reading Companion reading limit increase request",
+              request: "I would like to request an increase to my daily reading time limit.",
+              userId: nav.userId,
+              name: nav.readerName,
+            })}>
               <Send size={15} /> Contact developer
-            </a>
-            {nav.readingQuota?.canManage && (
-              <div className="set-form st-quota-admin">
-                <b>Developer limit controls</b>
-                <label className="st-lbl">Reader account UUID
-                  <input className="st-input full" value={quotaUserId} onChange={(event) => setQuotaUserId(event.target.value)} placeholder="Supabase user ID" />
-                </label>
-                <label className="st-lbl">Daily minutes
-                  <input className="st-input" type="number" min="1" max="1440" step="1" value={quotaMinutes} onChange={(event) => setQuotaMinutes(event.target.value)} />
-                </label>
-                <button type="button" className="st-btn" disabled={quotaSaving || !quotaUserId.trim()} onClick={async () => {
-                  setQuotaSaving(true);
-                  try {
-                    await nav.setReadingLimit(quotaUserId.trim(), Number(quotaMinutes));
-                    flash("Account reading limit updated.");
-                    setQuotaUserId("");
-                  } catch (error) {
-                    flash(error.message || "The account limit could not be updated.");
-                  } finally {
-                    setQuotaSaving(false);
-                  }
-                }}>{quotaSaving ? "Saving…" : "Update account limit"}</button>
-                <small>Only account IDs on the server’s SESSION_LIMIT_ADMIN_USER_IDS allowlist can use this action.</small>
-              </div>
-            )}
+            </button>
           </div>
         </SetSec>
 

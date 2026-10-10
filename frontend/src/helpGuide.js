@@ -262,9 +262,9 @@ const BASE_HELP_GUIDE = [
   {
     id: "gem-detail",
     title: "Gem detail, illustrations and downloads",
-    keywords: ["gem detail", "illustration", "generate illustration", "regenerate", "retry", "real-life application", "download gem", "share gem"],
+    keywords: ["gem detail", "illustration", "generate illustration", "regenerate", "retry", "real-life application", "download gem", "share gem", "gem card template", "quote card style", "card aspect ratio", "surprise me", "editorial paper", "polaroid card", "cosmic card"],
     screen: "gems",
-    content: "A gem detail page shows the quote, book, author and chapter. **Generate illustration** lets you choose styles such as **Lo-fi Ghibli**, **Charcoal Sketch**, **Cinematic Silhouette** and **White Ink Sketch**. **Regenerate** or **Retry** appear when needed. The detail page also shows the **Real-life application**. Use **Download** or **Share** to export a polished quote card image.",
+    content: "A gem detail page shows the quote, book, author and chapter. **Generate illustration** lets you choose styles such as **Lo-fi Ghibli**, **Charcoal Sketch**, **Cinematic Silhouette** and **White Ink Sketch**. **Regenerate** or **Retry** appear when needed. The detail page also shows the **Real-life application**. Use **Download** or **Share** to open the quote-card studio. Pick one of 14 layouts in the horizontal template strip, previewed with your quote; choose **Story** (9:16), **Post** (4:5) or **Square** (1:1), and select a color effect to set its accent. **Surprise me** picks a template and effect. Your last template, effect and ratio are saved on this device. Export creates a 1080-pixel-wide PNG; photo layouts use a generated-color fallback if an image is missing or unavailable.",
   },
   {
     id: "memory",
@@ -285,16 +285,16 @@ const BASE_HELP_GUIDE = [
   {
     id: "profile",
     title: "Profile, avatar and companion",
-    keywords: ["profile", "reader profile", "avatar", "change avatar", "upload photo", "remove photo", "companion", "mascot", "owl", "robot", "sprout", "fox", "book"],
+    keywords: ["profile", "reader profile", "avatar", "change avatar", "upload photo", "remove photo", "companion", "mascot", "owl", "robot", "sprout", "fox", "book", "uid", "user id", "copy my id", "profile scroll", "sticky profile", "arena photo", "show photo in arena", "hide my arena photo"],
     screen: "profile",
-    content: "The **Profile** card lets you change your photo, edit your name, open the avatar picker, and choose your reading companion. Tap the main photo or the small camera button to upload an image, then crop it in a circle before saving. Tap **Change avatar** to open the preset avatar tray, and **Remove photo** appears there when you have a custom photo. The **Reader Arena** card opens weekly and all-time reading rankings and shows your live weekly place. Below it are **Account**, **Settings**, **Report an issue**, **Help & guide**, and **About**.",
+    content: "The **Profile** reader card lets you change your photo, edit your name, open the avatar picker, and choose your reading companion. Your signed-in Supabase **UID** appears beneath your name; tap its copy icon to copy it and see **Copied** feedback. While you scroll, this reader card stays at the top and the companion, Reader Arena, Account, Settings and other options scroll below it. Tap the main photo or camera button to upload and crop an image. Tap **Change avatar** to open presets; **Remove photo** appears for a custom image. In **Profile → Settings → Privacy & storage**, **Show my photo in the Arena** controls whether other signed-in readers see your cropped photo; it is on by default, and off shows initials instead. The photo is uploaded to private storage and delivered to signed-in Arena readers through short-lived links.",
   },
   {
     id: "reader-arena",
     title: "Reader Arena",
-    keywords: ["reader arena", "arena", "reader ranking", "reading leaderboard", "weekly reading rank", "all time ranking", "rank readers", "reading race"],
+    keywords: ["reader arena", "arena", "reader ranking", "reading leaderboard", "weekly reading rank", "all time ranking", "rank readers", "reading race", "ranking calculation", "ranking data", "rank ties", "dense rank", "arena data flow", "refresh leaderboard", "active reading seconds", "weekly migration"],
     screen: "profile",
-    content: "Open **Profile** and tap **Reader Arena** to compare actual reading time with other readers. **This week** ranks time from Monday 00:00 to Sunday 24:00 India time and shows when the race resets; **All time** shows lifetime reading time. The podium and reader cards show rank, reader name and time. Tap a reader for those same public ranking details. Your own place stays pinned at the bottom; a new reading session starts your race if you are not ranked yet.",
+    content: "Open **Profile** → **Reader Arena** to compare accepted active-reading time. The app normally batches usage after 10 seconds, sends up to 60 seconds per request, and flushes sooner when the daily allowance runs out. Each request includes the reader’s profile name and signed-in Supabase session. The server validates the account, then a service-role RPC stores the name plus lifetime and weekly seconds in `reading_companion_session_limits`. Book titles, page content, email and account IDs are not shown in the Arena; the server uses the account ID only to associate usage and mark your row as **You**. **This week** totals seconds recorded since Monday 00:00 in Asia/Kolkata; **All time** uses lifetime seconds. Readers with no recorded time are excluded. Equal totals share a rank; tied readers are displayed in a stable order by their private Supabase account ID. Weekly totals start when the Arena migration is applied; earlier time cannot be backfilled. Zero readers see an empty state, one reader gets a hero card, two readers get a two-step podium, and larger races get a three-person podium with the remaining ranks in a scrollable list. For 1–2 readers, use **Invite a friend to race**. When the screen opens or you change period, the app requests rankings from the server; use the refresh button to fetch again. It does not poll while open, though the weekly countdown updates every minute. The refresh button retries errors, and reconnecting retries an offline request. Your place stays pinned above the bottom navigation; the podium shows your photo only if **Show my photo in the Arena** is enabled.",
   },
   {
     id: "account-sync",
@@ -309,35 +309,35 @@ const BASE_HELP_GUIDE = [
     keywords: ["settings", "your name", "companion name", "daily reading goal", "appearance", "theme", "voice", "preview this voice", "notifications", "reading limit", "30 minutes"],
     screen: "settings",
     demo: "settings",
-    content: "Open **Profile** → **Settings**. **You & your companion** lets you edit your name, your companion’s name, and the **Daily reading goal**. **Appearance** switches between **Light** and **Dark**. **Voice** lets you pick a companion voice and use **Preview this voice**. **Notifications** contains **App updates & announcements** and **Smart study reminders**. **Reading limit** explains the prototype’s 30-minute daily allowance and includes a developer contact link.",
+    content: "Open **Profile** → **Settings**. **You & your companion** lets you edit your name, your companion’s name, and the **Daily reading goal**. **Appearance** switches between **Light** and **Dark**. **Voice** lets you pick a companion voice and use **Preview this voice**. **Notifications** contains **App updates & announcements** and **Smart study reminders**. **Reading limit** shows your account’s configured daily allowance and a contact link for increase requests; limit values are managed directly in Supabase.",
   },
   {
     id: "daily-reading-limit",
     title: "Daily reading allowance",
-    keywords: ["30 minutes", "30 minute limit", "daily reading limit", "session cap", "reading allowance", "prototype limit", "extend the limit"],
+    keywords: ["30 minutes", "30 minute limit", "daily reading limit", "session cap", "reading allowance", "prototype limit", "extend the limit", "request more reading time", "increase reading limit", "reading limit request", "limit increase request", "limit email", "email to increase my limit"],
     screen: "settings",
-    content: "Each signed-in account has a server-tracked daily reading allowance, set to **30 minutes by default** and shared across the account’s devices. The current limit and remaining time appear in **Profile → Settings → Reading limit**. When it runs out, the session ends and the app explains that the prototype limit helps manage shared AI capacity. Use **Contact developer** to request an adjustment; only a developer/admin can change an account’s allowance.",
+    content: "Each signed-in account has a server-tracked daily reading allowance, set to **30 minutes by default** and shared across the account’s devices. The current limit and remaining time appear in **Profile → Settings → Reading limit**. When it runs out, the session ends and a notice offers **Contact Developer**. That action opens a pre-filled Gmail request with your Supabase UID and limit-increase context. The developer changes limit values directly in Supabase; there are no in-app admin controls.",
   },
   {
     id: "settings-data",
     title: "Privacy, storage, backup and delete data",
     keywords: ["privacy", "storage used", "clear conversation history", "clear saved preferences", "delete all gems", "export backup", "restore", "delete all my data", "deleted books", "trash bin", "restore a book"],
     screen: "settings",
-    content: "In **Settings**, **Privacy & storage** shows what stays on your device and what is sent to Google Gemini during reading, plus a **Storage used** meter. You can use **Clear conversation history**, **Clear saved preferences**, and **Delete all gems**. Open the **Deleted books** card to visit the separate bin page; archived books keep their chapters, linked gems and conversation recaps until restored or permanently deleted. **Reading limit** shows your account’s configured daily allowance. **Backup** offers **Export backup** and **Restore**. In **Danger zone**, **Delete all my data** erases books, gems, memory and profile after confirmation.",
+    content: "In **Settings**, **Privacy & storage** shows what stays on your device and what is sent to Google Gemini during reading, plus a **Storage used** meter. It also includes **Show my photo in the Arena**. Enabled photos live in a private storage bucket and are served to signed-in Arena readers through short-lived links; turn the switch off to show initials instead. You can use **Clear conversation history**, **Clear saved preferences**, and **Delete all gems**. Open the **Deleted books** card to visit the separate bin page; archived books keep their chapters, linked gems and conversation recaps until restored or permanently deleted. **Reading limit** shows your account’s configured daily allowance. **Backup** offers **Export backup** and **Restore**. In **Danger zone**, **Delete all my data** erases books, gems, memory and profile after confirmation.",
   },
   {
     id: "notifications",
     title: "Notifications and reminders",
     keywords: ["notifications", "push notifications", "app updates announcements", "study reminders", "blocked notifications", "turn on notifications"],
     screen: "settings",
-    content: "Turn notifications on in **Settings** → **Notifications**. **App updates & announcements** sends version news and important app notices. **Smart study reminders** learns when you usually read and nudges you shortly before that time. If notifications are blocked, the app can show a banner with device-specific steps for turning them back on.",
+    content: "Turn notifications on in **Settings** → **Notifications**. **App updates & announcements** sends version news and important app notices, including a release announcement after a successful production deployment. **Smart study reminders** learns when you usually read and nudges you shortly before that time. OS push announcements require notification permission and the app-updates toggle; if notifications are blocked, the app can show device-specific steps for turning them back on.",
   },
   {
     id: "updates",
     title: "App updates and release notes",
-    keywords: ["check for updates", "update available", "release notes", "version and release notes", "major update", "ui enhancement", "a new chapter", "signature update"],
+    keywords: ["check for updates", "update available", "release notes", "version and release notes", "major update", "ui enhancement", "a new chapter", "signature update", "production deployment", "production deploy push", "deployment announcement", "automatic release push", "push after deploy"],
     screen: "settings",
-    content: "Use **Settings** → **Check for updates** to look for a newer app version. If one is waiting, **Profile** and **Settings** can show a badge, and the update UI lists what changed. **Version & release notes** opens the full release history. Release cards can carry labels like **Major update**, **UI enhancement**, **A new chapter**, or **Signature update**.",
+    content: "Use **Settings** → **Check for updates** to look for a newer app version. The update card shows its version and changelog, with **Update now** and **Later** actions; **Version & release notes** opens the full history. Readers who enabled **App updates & announcements** can also receive an OS notification after a successful production deployment from `main`. Release cards can carry labels like **Major update**, **UI enhancement**, **A new chapter**, or **Signature update**.",
   },
   {
     id: "report-issue",
@@ -385,7 +385,7 @@ const STOP_WORDS = new Set([
   "tell", "show", "work", "works", "just", "then", "there", "them",
 ]);
 
-const RELEASE_QUERY_RE = /\b(update|updates|version|versions|release|releases|history|introduced|added|shipped|what'?s new|whats new)\b/i;
+const RELEASE_QUERY_RE = /\b(which|when|show|list)\b.*\b(update|version|release|introduced|added|shipped|history|notes)\b|\b(release notes|release history|version history|what'?s new|whats new)\b/i;
 
 function compareVersions(left, right) {
   const a = String(left || "").split(".").map(Number);
@@ -448,6 +448,7 @@ export function findRelevantHelp(query, limit = 3) {
     if (entry.id === "streak" && /\bstreak\b/.test(normalizedQuery)) score += 7;
     if (entry.id === "recall-card" && /\b(revisit these|yaad tha|hint dekhein|agli baar|recall)\b/.test(normalizedQuery)) score += 7;
     if (entry.id === "updates" && /\b(check for updates|update available|release notes|version and release notes)\b/.test(normalizedQuery)) score += 8;
+    if (entry.id === "updates" && /\b(production deploy|production deployment|deployment push|automatic release push)\b/.test(normalizedQuery)) score += 12;
     if (entry.id === "about" && /\babout\b/.test(normalizedQuery)) score += 7;
     if (entry.id === "settings" && /\b(setting|settings|theme|dark|light|voice|goal|notification|appearance)\b/.test(normalizedQuery)) score += 6;
     if (entry.id === "voice-commands" && /\b(voice|command|commands|say|companion can do|can i ask)\b/.test(normalizedQuery)) score += 7;

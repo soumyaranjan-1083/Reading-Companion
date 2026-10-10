@@ -43,6 +43,8 @@ import {
     ChevronRight,
     Clock,
     Cloud,
+    Copy,
+    Fingerprint,
     Download,
     Flame,
     Gem,
@@ -146,9 +148,9 @@ import {
     UPDATE_MEMORY_DECLARATION,
 } from "./persona.js";
 import { Profile } from "./profile.js";
-import { fetchReadingQuota, recordReadingUsage, setReadingLimit } from "./readingQuota.js";
+import { clearArenaAvatar, fetchReadingQuota, recordReadingUsage, uploadArenaAvatar } from "./readingQuota.js";
 import ReaderArenaEntry from "./ReaderArenaEntry.jsx";
-import { CONTACT } from "./developerContact.js";
+import { openContactEmail } from "./developerContact.js";
 import "./ProfileUI.css";
 import "./ProfileCard.css";
 import AvatarCropper from "./AvatarCropper";
@@ -744,6 +746,8 @@ function AppCore() {
   const badges = computeBadges({ updateAvailable: updateState.available });
 
   const nav = {
+    userId: account.user.id,
+    readerName: profileStore.data.name,
     accountEmail: account.user.email || "Google account",
     accountSyncStatus: account.syncStatus,
     signOut: account.signOut,
@@ -768,14 +772,6 @@ function AppCore() {
     readingQuota,
     quotaError,
     refreshReadingQuota,
-    setReadingLimit: async (userId, dailyLimitMinutes) => {
-      const updated = await setReadingLimit(userId, dailyLimitMinutes);
-      if (userId === account.user.id) {
-        quotaRef.current = updated;
-        setReadingQuota(updated);
-      }
-      return updated;
-    },
     checkForUpdates: () => updateActionsRef.current?.checkForUpdates?.() || false,
     applyUpdate: () => updateActionsRef.current?.applyUpdate?.(),
     openChapterGrid: (bookId) => navigateTo("chapterGrid", { activeBookId: bookId }),
@@ -853,12 +849,16 @@ function AppCore() {
             >
               <div className="daily-limit-icon"><Clock size={24} /></div>
               <p className="eyebrow">A little more tomorrow</p>
-              <h2 id="daily-limit-title">Your {readingQuota?.dailyLimitMinutes ?? 30}-minute reading time is complete</h2>
-              <p>Reading Companion is a prototype, and this daily limit helps us manage shared AI service capacity fairly. Your books and progress are saved safely.</p>
-              <p className="daily-limit-small">Need a longer session? Get in touch with the developer.</p>
-              <a className="primary-button daily-limit-contact" href={`mailto:${CONTACT.email}?subject=${encodeURIComponent("Reading Companion daily session limit")}`}>
-                <Mail size={17} /> Contact the developer
-              </a>
+              <h2 id="daily-limit-title">You’ve reached today’s reading limit</h2>
+              <p>Your {readingQuota?.dailyLimitMinutes ?? 30}-minute allowance is used for today. Your books and progress are saved safely. Contact the developer to request more reading time.</p>
+              <button type="button" className="primary-button daily-limit-contact" onClick={() => openContactEmail({
+                subject: "Reading Companion reading limit increase request",
+                request: "I have reached my daily reading session limit and would like to request an increase.",
+                userId: account.user.id,
+                name: profileStore.data.name,
+              })}>
+                <Mail size={17} /> Contact Developer
+              </button>
               <button type="button" className="daily-limit-close" onClick={() => setDailyLimitOpen(false)}>I’ll come back tomorrow</button>
             </Motion.section>
           </Motion.div>
@@ -2713,11 +2713,47 @@ function MemoryScreen() {
 function ProfileScreen({ nav }) {
   const docsUnlocked = useDocsUnlocked();
   const [name, setName] = useState(profileStore.data.name);
+  const profileAvatar = profileStore.data.avatar;
   const mascot = useMascotPreference();
   const [, forceUpdate] = useState(0);
   const fileInputRef = useRef(null);
   const [cropFile, setCropFile] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [uidCopied, setUidCopied] = useState(false);
+  const arenaAvatarSyncRef = useRef(Promise.resolve());
+  const arenaAvatarSignatureRef = useRef("");
+
+  useEffect(() => {
+    if (!nav.userId) return undefined;
+    const avatar = profileAvatar;
+    if (!avatar && !arenaAvatarSignatureRef.current) return undefined;
+    const signature = avatar ? `${avatar.length}:${avatar.slice(0, 48)}:${avatar.slice(-32)}` : "removed";
+    const syncKey = `rc_arena_avatar_sync_${nav.userId}`;
+    try {
+      if (localStorage.getItem(syncKey) === signature) {
+        arenaAvatarSignatureRef.current = signature;
+        return undefined;
+      }
+    } catch {
+      // Sync continues if storage is unavailable.
+    }
+    if (arenaAvatarSignatureRef.current === signature) return undefined;
+    arenaAvatarSignatureRef.current = signature;
+    arenaAvatarSyncRef.current = arenaAvatarSyncRef.current.catch(() => {}).then(() => (
+      avatar ? uploadArenaAvatar(avatar) : clearArenaAvatar()
+    )).then(() => {
+      try {
+        if (avatar) localStorage.setItem(syncKey, signature);
+        else localStorage.removeItem(syncKey);
+      } catch {
+        // The next Profile visit can safely retry the sync.
+      }
+    }).catch((error) => {
+      console.warn("[READING_ARENA] Could not sync profile photo", error?.message || error);
+      if (arenaAvatarSignatureRef.current === signature) arenaAvatarSignatureRef.current = "";
+    });
+    return undefined;
+  }, [nav.userId, profileAvatar]);
 
   function handleAvatarPick(e) {
     const file = e.target.files?.[0];
@@ -2735,8 +2771,24 @@ function ProfileScreen({ nav }) {
     setPickerOpen(false);
     forceUpdate((n) => n + 1);
   }
+  async function copyUserId() {
+    try {
+      await navigator.clipboard.writeText(nav.userId);
+    } catch {
+      const field = document.createElement("textarea");
+      field.value = nav.userId;
+      field.setAttribute("readonly", "");
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      try { document.execCommand("copy"); } finally { document.body.removeChild(field); }
+    }
+    setUidCopied(true);
+    window.setTimeout(() => setUidCopied(false), 2200);
+  }
 
-  const hasPhoto = !!profileStore.data.avatar;
+  const hasPhoto = !!profileAvatar;
   const rise = (i) => ({ initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.45, delay: 0.06 * i, ease: "easeOut" } });
 
   return (
@@ -2745,10 +2797,10 @@ function ProfileScreen({ nav }) {
 
       <Motion.section className="pc" {...rise(0)}>
         <span className="pc-rim" aria-hidden="true" />
+        <ProfileFloaters />
         <div className="pc-badge">Reader profile</div>
 
         <div className="pc-stage">
-        <ProfileFloaters />
         <div className="pc-avatar">
           <span className="pc-ripples" aria-hidden="true"><i /><i /><i /></span>
           <button type="button" className="pc-photo" onClick={() => fileInputRef.current?.click()} aria-label="Change photo">
@@ -2762,6 +2814,12 @@ function ProfileScreen({ nav }) {
         </div>
 
         <input className="pc-name" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} onBlur={() => profileStore.setName(name)} aria-label="Your name" />
+        {nav.userId && <div className="pc-uid">
+          <span><Fingerprint size={14} aria-hidden="true" /><b>UID:</b><code>{nav.userId}</code></span>
+          <button type="button" onClick={copyUserId} aria-label={uidCopied ? "User ID copied" : "Copy user ID"}>
+            {uidCopied ? <Check size={14} /> : <Copy size={14} />}{uidCopied && <small aria-live="polite">Copied</small>}
+          </button>
+        </div>}
 
         <button type="button" className="pc-change" aria-expanded={pickerOpen} onClick={() => setPickerOpen((v) => !v)}>
           {pickerOpen ? "Close" : "Change avatar"}
@@ -2856,7 +2914,7 @@ function ProfileScreen({ nav }) {
           <span className="pf-tile-ic"><Info size={20} /></span>
           <span className="pf-tile-text"><b>About</b><small>Why this exists & Who has built this</small></span>
         </button>
-        {docsUnlocked && <DocsAccessCard onOpen={nav.goDocs} />}
+        {docsUnlocked && <DocsAccessCard userId={nav.userId} readerName={nav.readerName} onOpen={nav.goDocs} />}
 
       </Motion.section>
 

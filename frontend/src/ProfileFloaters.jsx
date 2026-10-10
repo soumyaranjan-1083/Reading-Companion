@@ -10,6 +10,8 @@ const ITEMS = [
   { Icon: Quote, x: 92, y: 52, s: 18, d: -5, t: "var(--pc-a)" },
   { Icon: Sparkles, x: 78, y: 28, s: 11, d: -2.5, t: "var(--pc-a)" },
   { Icon: "Aa", x: 6, y: 52, s: 15, d: -3.5, t: "var(--pc-c)" },
+  { Icon: BookOpen, x: 9, y: 88, s: 17, d: -1.5, t: "var(--pc-b)" },
+  { Icon: Sparkles, x: 91, y: 88, s: 12, d: -4.5, t: "var(--pc-a)" },
 ];
 
 export default function ProfileFloaters() {

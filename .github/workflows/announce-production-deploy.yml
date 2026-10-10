@@ -1,0 +1,51 @@
+name: Announce production update
+
+'on':
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.ref == 'main' &&
+      (github.event.deployment.environment == 'production' || github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+      - name: Prepare release announcement
+        id: release
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+
+          const pkg = JSON.parse(readFileSync('frontend/package.json', 'utf8'));
+          const notes = JSON.parse(readFileSync('frontend/public/release-notes.json', 'utf8'));
+          const release = (notes.releases || []).find((item) => item.version === pkg.version);
+          const changes = (release?.items || []).slice(0, 3).map((item) => item.text).join('; ');
+          const payload = {
+            title: `Reading Companion v${pkg.version} is live`,
+            body: [release?.title, changes].filter(Boolean).join(': ').slice(0, 240),
+            url: '/',
+            tag: `release-${pkg.version}`,
+          };
+          appendFileSync(process.env.GITHUB_OUTPUT, `payload=${JSON.stringify(payload)}\n`);
+          NODE
+      - name: Send announcement to opted-in readers
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          PAYLOAD: ${{ steps.release.outputs.payload }}
+        run: |
+          if [[ -z "$ADMIN_TOKEN" ]]; then
+            echo "::error::Configure the ADMIN_TOKEN repository secret to enable production push announcements."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://reading-companion-l5ek.onrender.com/api/push/send" \
+            -H "Content-Type: application/json" \
+            -H "x-admin-token: $ADMIN_TOKEN" \
+            --data "$PAYLOAD"

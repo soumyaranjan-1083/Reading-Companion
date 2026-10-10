@@ -29,6 +29,22 @@ export function fetchReaderRankings(period = "all_time") {
   return quotaRequest(`/api/reading/rankings?period=${encodeURIComponent(period)}`);
 }
 
+export function fetchArenaPhotoPreference() {
+  return quotaRequest("/api/reading/arena-preferences");
+}
+
+export function setArenaPhotoVisibility(showPhoto) {
+  return quotaRequest("/api/reading/arena-preferences", "PUT", { showPhoto });
+}
+
+export function uploadArenaAvatar(dataUrl) {
+  return quotaRequest("/api/reading/arena-avatar", "POST", { dataUrl });
+}
+
+export function clearArenaAvatar() {
+  return quotaRequest("/api/reading/arena-avatar", "DELETE");
+}
+
 export function recordReadingUsage(seconds, readerName) {
   return quotaRequest("/api/reading/session-usage", "POST", { seconds, readerName });
 }

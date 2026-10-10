@@ -2,12 +2,12 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { BookMarked, ChevronRight, Mail, ShieldAlert, X } from "lucide-react";
 import { checkDocsAccess } from "./docsAccess.js";
-import { CONTACT } from "./developerContact.js";
+import { openContactEmail } from "./developerContact.js";
 import { useBackLayer } from "./backStack.js";
 import "./DocsAccessCard.css";
 
 // The Profile "Docs" tile. Owners go straight in; anyone else sees a friendly "not authorised" notice.
-export default function DocsAccessCard({ onOpen }) {
+export default function DocsAccessCard({ onOpen, userId, readerName }) {
   const [checking, setChecking] = useState(false);
   const [denied, setDenied] = useState(false);
   useBackLayer(denied, () => setDenied(false));
@@ -39,9 +39,14 @@ export default function DocsAccessCard({ onOpen }) {
             <div className="dac-icon"><ShieldAlert size={30} /></div>
             <h3 id="dac-title">You’re not authorised</h3>
             <p id="dac-text">You are not authorised to view these docs. Please contact the developer to request access.</p>
-            <a className="dac-mail" href={`mailto:${CONTACT.email}?subject=${encodeURIComponent("Reading Companion docs access")}`} aria-label="Email the developer">
+            <button type="button" className="dac-mail" onClick={() => openContactEmail({
+              subject: "Reading Companion docs access request",
+              request: "I would like access to the private technical documentation for Reading Companion.",
+              userId,
+              name: readerName,
+            })} aria-label="Contact the developer about docs access">
               <Mail size={18} /> Contact developer
-            </a>
+            </button>
             <button type="button" className="dac-close" onClick={() => setDenied(false)} aria-label="Close"><X size={16} /></button>
           </div>
         </div>,

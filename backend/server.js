@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchAuthorBio, fetchBookDetails, findBooks, fetchTocByIsbn, parseVisionChapters, validateImages, TOC_VISION_PROMPT } from "./bookLookup.js";
@@ -10,7 +10,7 @@ import { getAiProviderOrder, readTextCompletion, requestTextCompletion, streamTe
 import { normalizeGemEchoCatalog, validateGemEchoCandidates, validateGemEchoPairs } from "./gemEchoes.js";
 import { classifyGeminiFailure, KeyPool } from "./geminiKeyPool.js";
 import { verifyDocsOwner, loadDocsBundle } from "./docsAccess.js";
-import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
+import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, normalizeArenaAvatarUrl, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
 import { parsePageVerification } from "./pageVerification.js";
 import { registerDocsNarration } from "./docsNarration.js";
 import { buildChunks, retrieve, buildMessages, pickCited } from "./docsHelper.js";
@@ -35,12 +35,16 @@ app.use("/api/bug-reports/screenshots", express.json({ limit: "7mb" }));
 app.use("/api/bug-reports", express.json({ limit: "7mb" }));
 app.use("/api/book-lookup/toc-scan", express.json({ limit: "10mb" }));
 app.use("/api/reading/ask-text", express.json({ limit: "6mb" }));
+app.use("/api/reading/arena-avatar", express.json({ limit: "2mb" }));
 app.use("/api/reading/verify-page", express.json({ limit: "6mb" }));
 app.use("/api/reading/classify-utterance", express.json({ limit: "2mb" }));
 app.use(express.json());
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const READER_ARENA_AVATARS_BUCKET = "reader-arena-avatars";
+const MAX_READER_ARENA_AVATAR_BYTES = 1024 * 1024;
+const readerArenaAvatarUrlCache = new Map();
 const REPORT_SCREENSHOTS_BUCKET = "bug-report-screenshots";
 const MAX_REPORT_SCREENSHOTS = 4;
 const MAX_REPORT_SCREENSHOTS_BYTES = 5 * 1024 * 1024;
@@ -1326,8 +1330,11 @@ async function callReadingQuotaRpc(name, payload, allowEmpty = false) {
     },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new Error(`reading_limit_storage_${response.status}`);
-  const rows = await response.json();
+  const rows = await response.json().catch(() => null);
+  if (!response.ok) {
+    const rpcCode = typeof rows?.code === "string" ? rows.code.replace(/[^a-z0-9]/gi, "").slice(0, 20) : "";
+    throw new Error(`reading_limit_storage_${response.status}${rpcCode ? `_${rpcCode}` : ""}`);
+  }
   if (!Array.isArray(rows) || (!allowEmpty && !rows[0])) throw new Error("reading_limit_storage_empty");
   return allowEmpty ? rows : rows[0];
 }
@@ -1340,6 +1347,98 @@ async function getAuthenticatedQuotaUser(req, res) {
   }
   return userId;
 }
+
+function supabaseServiceHeaders(extra = {}) {
+  return {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+function validArenaAvatarPath(path) {
+  return typeof path === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/avatar\.(?:jpg|png|webp)$/i.test(path);
+}
+
+async function arenaStorageRequest(path, options = {}) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error("arena_avatar_storage_unavailable");
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/${path}`, {
+    ...options,
+    headers: supabaseServiceHeaders(options.headers),
+  });
+  if (!response.ok) throw new Error(`arena_avatar_storage_${response.status}`);
+  return response.status === 204 ? null : response.json().catch(() => null);
+}
+
+async function getArenaAccountSettings(userId) {
+  await callReadingQuotaRpc("get_reading_companion_session_limit", { p_user_id: userId });
+  const query = new URLSearchParams({ select: "arena_show_photo,arena_avatar_path", user_id: `eq.${userId}` });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/reading_companion_session_limits?${query}`, {
+    headers: supabaseServiceHeaders(),
+  });
+  if (!response.ok) throw new Error(`arena_preferences_storage_${response.status}`);
+  const rows = await response.json();
+  return rows[0] || { arena_show_photo: true, arena_avatar_path: null };
+}
+
+async function updateArenaAccountSettings(userId, values) {
+  await callReadingQuotaRpc("get_reading_companion_session_limit", { p_user_id: userId });
+  const query = new URLSearchParams({ user_id: `eq.${userId}` });
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/reading_companion_session_limits?${query}`, {
+    method: "PATCH",
+    headers: supabaseServiceHeaders({ Prefer: "return=minimal" }),
+    body: JSON.stringify({ ...values, updated_at: new Date().toISOString() }),
+  });
+  if (!response.ok) throw new Error(`arena_preferences_storage_${response.status}`);
+}
+
+function parseArenaAvatar(dataUrl) {
+  if (typeof dataUrl !== "string") return null;
+  const match = /^data:image\/(jpeg|png|webp);base64,([a-z0-9+/]+={0,2})$/i.exec(dataUrl);
+  if (!match) return null;
+  const mime = `image/${match[1].toLowerCase()}`;
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > MAX_READER_ARENA_AVATAR_BYTES) return null;
+  const validSignature = mime === "image/jpeg" ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    : mime === "image/png" ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      : bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+  if (!validSignature) return null;
+  return { mime, bytes, extension: mime === "image/jpeg" ? "jpg" : mime.slice("image/".length) };
+}
+
+async function deleteArenaAvatarObject(path) {
+  if (!validArenaAvatarPath(path)) return;
+  await arenaStorageRequest(`object/${READER_ARENA_AVATARS_BUCKET}`, {
+    method: "DELETE",
+    body: JSON.stringify({ prefixes: [path] }),
+  });
+}
+
+async function createArenaAvatarUrl(path) {
+  if (!validArenaAvatarPath(path)) return null;
+  const cached = readerArenaAvatarUrlCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  try {
+    const segments = path.split("/").map(encodeURIComponent).join("/");
+    const signed = await arenaStorageRequest(`object/sign/${READER_ARENA_AVATARS_BUCKET}/${segments}`, {
+      method: "POST",
+      body: JSON.stringify({ expiresIn: 300 }),
+    });
+    const candidate = signed?.signedURL || signed?.signedUrl;
+    const url = normalizeArenaAvatarUrl(candidate, SUPABASE_URL);
+    if (url) {
+      readerArenaAvatarUrlCache.set(path, { url, expiresAt: Date.now() + 4 * 60 * 1000 });
+      if (readerArenaAvatarUrlCache.size > 2000) {
+        for (const [cachedPath, entry] of readerArenaAvatarUrlCache) if (entry.expiresAt <= Date.now()) readerArenaAvatarUrlCache.delete(cachedPath);
+        if (readerArenaAvatarUrlCache.size > 2000) readerArenaAvatarUrlCache.delete(readerArenaAvatarUrlCache.keys().next().value);
+      }
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
   const readingLimitAdmins = parseAdminUserIds(process.env.SESSION_LIMIT_ADMIN_USER_IDS);
   app.get("/api/reading/rankings", async (req, res) => {
     res.set("Cache-Control", "no-store");
@@ -1349,10 +1448,81 @@ async function getAuthenticatedQuotaUser(req, res) {
     if (!userId) return;
     try {
       const rows = await callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: period }, true);
-      return res.json({ rankings: readerRankingResponse(rows, userId) });
+      const withAvatars = await Promise.all(rows.map(async (row) => ({
+        ...row,
+        avatar_url: row.arena_show_photo === true ? await createArenaAvatarUrl(row.arena_avatar_path) : null,
+      })));
+      return res.json({ rankings: readerRankingResponse(withAvatars, userId, SUPABASE_URL) });
     } catch (error) {
       console.error("[READING_RANKINGS] fetch failed:", redactSecrets(error?.message || error, 160));
       return res.status(503).json({ error: "reader_rankings_unavailable" });
+    }
+  });
+
+  app.get("/api/reading/arena-preferences", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const userId = await getAuthenticatedQuotaUser(req, res);
+    if (!userId) return;
+    try {
+      const settings = await getArenaAccountSettings(userId);
+      return res.json({ showPhoto: settings.arena_show_photo !== false });
+    } catch (error) {
+      console.error("[READING_ARENA] preference fetch failed:", redactSecrets(error?.message || error, 160));
+      return res.status(503).json({ error: "reader_arena_preferences_unavailable" });
+    }
+  });
+
+  app.put("/api/reading/arena-preferences", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const userId = await getAuthenticatedQuotaUser(req, res);
+    if (!userId) return;
+    if (typeof req.body?.showPhoto !== "boolean") return res.status(400).json({ error: "invalid_arena_photo_preference" });
+    try {
+      await updateArenaAccountSettings(userId, { arena_show_photo: req.body.showPhoto });
+      return res.json({ showPhoto: req.body.showPhoto });
+    } catch (error) {
+      console.error("[READING_ARENA] preference update failed:", redactSecrets(error?.message || error, 160));
+      return res.status(503).json({ error: "reader_arena_preferences_unavailable" });
+    }
+  });
+
+  app.post("/api/reading/arena-avatar", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const userId = await getAuthenticatedQuotaUser(req, res);
+    if (!userId) return;
+    const avatar = parseArenaAvatar(req.body?.dataUrl);
+    if (!avatar) return res.status(400).json({ error: "invalid_arena_avatar" });
+    const nextPath = `${randomUUID()}/avatar.${avatar.extension}`;
+    try {
+      const previous = await getArenaAccountSettings(userId);
+      await arenaStorageRequest(`object/${READER_ARENA_AVATARS_BUCKET}/${nextPath.split("/").map(encodeURIComponent).join("/")}`, {
+        method: "POST",
+        headers: { "Content-Type": avatar.mime, "x-upsert": "true" },
+        body: avatar.bytes,
+      });
+      await updateArenaAccountSettings(userId, { arena_avatar_path: nextPath });
+      if (previous.arena_avatar_path && previous.arena_avatar_path !== nextPath) {
+        await deleteArenaAvatarObject(previous.arena_avatar_path).catch(() => {});
+      }
+      return res.json({ saved: true });
+    } catch (error) {
+      console.error("[READING_ARENA] avatar save failed:", redactSecrets(error?.message || error, 160));
+      return res.status(503).json({ error: "reader_arena_avatar_unavailable" });
+    }
+  });
+
+  app.delete("/api/reading/arena-avatar", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const userId = await getAuthenticatedQuotaUser(req, res);
+    if (!userId) return;
+    try {
+      const previous = await getArenaAccountSettings(userId);
+      await updateArenaAccountSettings(userId, { arena_avatar_path: null });
+      if (previous.arena_avatar_path) await deleteArenaAvatarObject(previous.arena_avatar_path);
+      return res.json({ saved: true });
+    } catch (error) {
+      console.error("[READING_ARENA] avatar removal failed:", redactSecrets(error?.message || error, 160));
+      return res.status(503).json({ error: "reader_arena_avatar_unavailable" });
     }
   });
 
