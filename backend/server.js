@@ -10,7 +10,7 @@ import { getAiProviderOrder, readTextCompletion, requestTextCompletion, streamTe
 import { normalizeGemEchoCatalog, validateGemEchoCandidates, validateGemEchoPairs } from "./gemEchoes.js";
 import { classifyGeminiFailure, KeyPool } from "./geminiKeyPool.js";
 import { verifyDocsOwner, loadDocsBundle } from "./docsAccess.js";
-import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, normalizeArenaAvatarUrl, parseAdminUserIds, quotaResponse, readerRankingResponse } from "./readingQuota.js";
+import { isUserId, normalizeDailyLimitMinutes, normalizeRankingPeriod, normalizeReaderName, normalizeUsageSeconds, normalizeArenaAvatarUrl, parseAdminUserIds, quotaResponse, readerRankingResponse, buildArenaRankingSets } from "./readingQuota.js";
 import { parsePageVerification } from "./pageVerification.js";
 import { registerDocsNarration } from "./docsNarration.js";
 import { buildChunks, retrieve, buildMessages, pickCited } from "./docsHelper.js";
@@ -1447,12 +1447,20 @@ async function createArenaAvatarUrl(path) {
     const userId = await getAuthenticatedQuotaUser(req, res);
     if (!userId) return;
     try {
-      const rows = await callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: period }, true);
-      const withAvatars = await Promise.all(rows.map(async (row) => ({
+      const [weeklyRows, allTimeRows] = await Promise.all([
+        callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: "weekly" }, true),
+        callReadingQuotaRpc("get_reading_companion_reader_rankings", { p_period: "all_time" }, true),
+      ]);
+      const withAvatars = await Promise.all(allTimeRows.map(async (row) => ({
         ...row,
         avatar_url: row.arena_show_photo === true ? await createArenaAvatarUrl(row.arena_avatar_path) : null,
       })));
-      return res.json({ rankings: readerRankingResponse(withAvatars, userId, SUPABASE_URL) });
+      const sets = buildArenaRankingSets(withAvatars, weeklyRows);
+      return res.json({
+        rankings: readerRankingResponse(period === "weekly" ? sets.weekly : sets.allTime, userId, SUPABASE_URL),
+        weeklyRankings: readerRankingResponse(sets.weekly, userId, SUPABASE_URL),
+        allTimeRankings: readerRankingResponse(sets.allTime, userId, SUPABASE_URL),
+      });
     } catch (error) {
       console.error("[READING_RANKINGS] fetch failed:", redactSecrets(error?.message || error, 160));
       return res.status(503).json({ error: "reader_rankings_unavailable" });
