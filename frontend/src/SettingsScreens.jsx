@@ -28,7 +28,6 @@ import { ReportDetail, ReportList } from "./ReportsView.jsx";
 import "./SettingsScreens.css";
 import { useHaptic } from "./useHaptic.js";
 import { APP_VERSION } from "./version.js";
-import { openContactEmail } from "./developerContact.js";
 import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuota.js";
 
 export { APP_VERSION };
@@ -604,11 +603,8 @@ export function SettingsScreen({ nav, stores }) {
               </span>
             </div>
             {nav.quotaError && <button type="button" className="st-btn" onClick={() => void nav.refreshReadingQuota?.().catch((error) => flash(error.message))}>Retry limit check</button>}
-            <button type="button" className="st-btn" onClick={() => openContactEmail({
-              subject: "Reading Companion reading limit increase request",
+            <button type="button" className="st-btn" onClick={() => nav.openDeveloperEmail("limit_increase", {
               request: "I would like to request an increase to my daily reading time limit.",
-              userId: nav.userId,
-              name: nav.readerName,
             })}>
               <Send size={15} /> Contact developer
             </button>

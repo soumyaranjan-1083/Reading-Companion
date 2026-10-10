@@ -150,7 +150,7 @@ import {
 import { Profile } from "./profile.js";
 import { clearArenaAvatar, fetchReadingQuota, recordReadingUsage, uploadArenaAvatar } from "./readingQuota.js";
 import ReaderArenaEntry from "./ReaderArenaEntry.jsx";
-import { openContactEmail } from "./developerContact.js";
+import DeveloperEmailSheet from "./DeveloperEmailSheet.jsx";
 import "./ProfileUI.css";
 import "./ProfileCard.css";
 import AvatarCropper from "./AvatarCropper";
@@ -227,6 +227,12 @@ function describeNow() {
 }
 function buildTimeLine() {
   return `Reader's current local date and time (from their device): ${describeNow()}. Use it for greetings and time-aware remarks.`;
+}
+function getContactEnvironment() {
+  const agent = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  const device = /Android/i.test(agent) ? "Android phone" : /iPhone|iPad/i.test(agent) ? "iPhone or iPad" : (typeof navigator === "undefined" ? "Mobile device" : navigator.platform || "Mobile device");
+  const browser = /SamsungBrowser/i.test(agent) ? "Samsung Internet" : /Edg\//i.test(agent) ? "Microsoft Edge" : /Firefox\//i.test(agent) ? "Firefox" : /Chrome\//i.test(agent) ? "Chrome" : /Safari\//i.test(agent) ? "Safari" : "Mobile browser";
+  return { device, browser, localTime: new Date().toLocaleString() };
 }
 function isChapterClosed(c) {
   return ["closed", "completed", "done", "finished"].includes(String(c?.status || "").trim().toLowerCase());
@@ -477,6 +483,7 @@ function AppCore() {
   const [newBookModalOpen, setNewBookModalOpen] = useState(false);
   const [storyRequest, setStoryRequest] = useState(null);
   const [dailyLimitOpen, setDailyLimitOpen] = useState(false);
+  const [developerEmailRequest, setDeveloperEmailRequest] = useState(null);
   const [readingQuota, setReadingQuota] = useState(null);
   const [quotaError, setQuotaError] = useState("");
   const quotaRef = useRef(null);
@@ -764,6 +771,7 @@ function AppCore() {
     goSettings: () => navigateTo("settings"),
     goAbout: () => navigateTo("about"),
     goDocs: () => navigateTo("docs"),
+    openDeveloperEmail: (kind, context = {}) => setDeveloperEmailRequest({ kind, context }),
     goReport: () => navigateTo("report"),
     goHelp: () => navigateTo("help"),
     openNewBook,
@@ -837,6 +845,18 @@ function AppCore() {
         onUpdate={nav.applyUpdate}
       />
       <NotificationHost />
+      {developerEmailRequest && (
+        <DeveloperEmailSheet
+          request={developerEmailRequest}
+          user={{ id: account.user.id, email: account.user.email, displayName: profileStore.data.name }}
+          context={{
+            dailyLimitMinutes: readingQuota?.dailyLimitMinutes,
+            minutesUsedToday: Number.isFinite(readingQuota?.usedSeconds) ? Math.round(readingQuota.usedSeconds / 6) / 10 : undefined,
+            ...getContactEnvironment(),
+          }}
+          onClose={() => setDeveloperEmailRequest(null)}
+        />
+      )}
       <AnimatePresence>
         {dailyLimitOpen && (
           <Motion.div className="modal-overlay" role="presentation" onClick={() => setDailyLimitOpen(false)}
@@ -851,11 +871,8 @@ function AppCore() {
               <p className="eyebrow">A little more tomorrow</p>
               <h2 id="daily-limit-title">You’ve reached today’s reading limit</h2>
               <p>Your {readingQuota?.dailyLimitMinutes ?? 30}-minute allowance is used for today. Your books and progress are saved safely. Contact the developer to request more reading time.</p>
-              <button type="button" className="primary-button daily-limit-contact" onClick={() => openContactEmail({
-                subject: "Reading Companion reading limit increase request",
-                request: "I have reached my daily reading session limit and would like to request an increase.",
-                userId: account.user.id,
-                name: profileStore.data.name,
+              <button type="button" className="primary-button daily-limit-contact" onClick={() => nav.openDeveloperEmail("limit_increase", {
+                request: "I have reached my daily reading limit and would like to request an increase.",
               })}>
                 <Mail size={17} /> Contact Developer
               </button>
@@ -2914,7 +2931,7 @@ function ProfileScreen({ nav }) {
           <span className="pf-tile-ic"><Info size={20} /></span>
           <span className="pf-tile-text"><b>About</b><small>Why this exists & Who has built this</small></span>
         </button>
-        {docsUnlocked && <DocsAccessCard userId={nav.userId} readerName={nav.readerName} onOpen={nav.goDocs} />}
+        {docsUnlocked && <DocsAccessCard userId={nav.userId} readerName={nav.readerName} onOpen={nav.goDocs} onContact={nav.openDeveloperEmail} />}
 
       </Motion.section>
 
