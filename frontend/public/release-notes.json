@@ -1,6 +1,28 @@
 {
   "releases": [
     {
+      "version": "2.5.0",
+      "arena": true,
+      "gemStudio": true,
+      "badge": "Gem Studio release",
+      "date": "2026-10-10",
+      "title": "Every Line, Reimagined",
+      "subtitle": "A fresh frame for the words you keep.",
+      "items": [
+        { "type": "feature", "text": "Gem Studio brings 14 distinct quote-card templates, live previews, three aspect ratios and Surprise me" },
+        { "type": "improve", "text": "Multilingual quotes fit each card, with Hindi fonts and offline-ready templates" },
+        { "type": "improve", "text": "Profile now shows a copyable account UID and keeps the reader card in view as the rest scrolls" },
+        { "type": "fix", "text": "Reader Arena handles ranking errors and adapts its podium, photo avatars, rows and pinned place card to roster size" },
+        { "type": "improve", "text": "Arena photos use a private, expiring link and can be hidden with Show my photo in the Arena" },
+        { "type": "improve", "text": "Tied readers share a rank in a stable order; small races offer a one-tap invite" },
+        { "type": "improve", "text": "Arena photos are served only to signed-in readers through private expiring links, with a Show my photo in the Arena privacy switch" },
+        { "type": "improve", "text": "Reading-limit and access requests open a prefilled email with the account ID and request details" },
+        { "type": "improve", "text": "Help & Guide now explains Gem Studio, Profile identity and the updated release flow" },
+        { "type": "feature", "text": "Readers who opt in can receive a push announcement after a successful production deployment" },
+        { "type": "improve", "text": "The update card now highlights the version, changelog and Update now or Later actions" }
+      ]
+    },
+    {
       "version": "2.4.0",
       "arena": true,
       "date": "2026-10-09",
@@ -10,7 +32,8 @@
         { "type": "feature", "text": "A new card on your Profile shows your place in this week’s reading race and when it resets" },
         { "type": "improve", "text": "The rankings now have a completely new animated Arena experience" },
         { "type": "fix", "text": "Your companion checks whether a photo really shows a book page before using it, and asks you to retake an unrelated or unreadable photo" },
-        { "type": "fix", "text": "Your companion now says plainly when it cannot see a page or does not know a chapter, instead of guessing" }
+        { "type": "fix", "text": "Your companion now says plainly when it cannot see a page or does not know a chapter, instead of guessing" },
+        { "type": "fix", "text": "Reader Arena recovers from a stale Supabase schema cache and provides clear loading, empty, error and retry states" }
       ]
     },
     {

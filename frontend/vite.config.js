@@ -45,6 +45,7 @@ export default defineConfig({
       workbox: {
         importScripts: ["push-sw.js"],
         navigateFallbackDenylist: [/^\/api/],
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         globIgnores: ["**/vad/**"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },

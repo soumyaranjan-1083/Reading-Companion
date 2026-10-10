@@ -25,7 +25,25 @@ export function normalizeRankingPeriod(value) {
   return value === "weekly" || value === "all_time" ? value : null;
 }
 
-export function readerRankingResponse(rows, currentUserId) {
+export function normalizeArenaAvatarUrl(value, supabaseUrl) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const base = new URL(supabaseUrl);
+    let avatar = new URL(value, base);
+    if (avatar.protocol !== "https:" || avatar.username || avatar.password) return null;
+    if (avatar.origin === base.origin && avatar.pathname.startsWith("/object/sign/reader-arena-avatars/")) {
+      avatar = new URL(`/storage/v1${avatar.pathname}${avatar.search}`, base);
+    }
+    const isGoogleAvatar = avatar.hostname === "lh3.googleusercontent.com";
+    const isPrivateArenaObject = avatar.origin === base.origin
+      && /^\/storage\/v1\/object\/sign\/reader-arena-avatars\/[0-9a-f-]{36}\/avatar\.(?:jpg|png|webp)$/i.test(decodeURIComponent(avatar.pathname));
+    return isGoogleAvatar || isPrivateArenaObject ? avatar.href : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readerRankingResponse(rows, currentUserId, supabaseUrl = "") {
   if (!Array.isArray(rows)) throw new Error("invalid_reader_rankings");
   return rows.map((row) => {
     const rank = Number(row?.rank_position);
@@ -38,6 +56,7 @@ export function readerRankingResponse(rows, currentUserId) {
       name: normalizeReaderName(row.reader_name),
       totalSeconds,
       isYou: String(row.user_id || "").toLowerCase() === String(currentUserId || "").toLowerCase(),
+      avatarUrl: row.arena_show_photo === true ? normalizeArenaAvatarUrl(row.avatar_url, supabaseUrl) : null,
     };
   });
 }
