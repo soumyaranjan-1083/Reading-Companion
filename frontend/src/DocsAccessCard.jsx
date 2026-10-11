@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { BookMarked, ChevronRight, Mail, ShieldAlert, X } from "lucide-react";
+import { Mail, ShieldAlert, X } from "lucide-react";
 import { checkDocsAccess } from "./docsAccess.js";
 import { useBackLayer } from "./backStack.js";
+import { InkIcon } from "./InkIcons.jsx";
 import "./DocsAccessCard.css";
 
 // The Profile "Docs" tile. Owners go straight in; anyone else sees a friendly "not authorised" notice.
@@ -26,9 +27,9 @@ export default function DocsAccessCard({ onOpen, onContact }) {
   return (
     <>
       <button type="button" className="pf-tile docs" onClick={handleOpen} aria-busy={checking}>
-        <span className="pf-tile-ic"><BookMarked size={20} /></span>
+        <span className="pf-tile-ic"><InkIcon name="docs" size={21} /></span>
         <span className="pf-tile-text"><b>Docs</b><small>{checking ? "Checking access…" : "How everything is built and run"}</small></span>
-        <ChevronRight size={18} className="pf-tile-go" />
+        <InkIcon name="chevron" size={19} className="pf-tile-go" />
       </button>
       {denied && createPortal(
         <div className="dac-wrap" role="alertdialog" aria-labelledby="dac-title" aria-describedby="dac-text">

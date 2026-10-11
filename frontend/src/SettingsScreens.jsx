@@ -3,15 +3,15 @@
 /* eslint-disable react-hooks/immutability */
 import { motion as Motion } from "framer-motion";
 import {
-    BellRing, Bug, Check, Clock3,
+    Bug, Check,
     ChevronLeft, ChevronRight,
     Cloud,
-    Download, HardDrive, ImagePlus, Lightbulb,
+    Download, ImagePlus, Lightbulb,
     LogOut,
-    Moon, Redo2, RefreshCw,
+    Redo2, RefreshCw,
     Send,
     Shield,
-    Sparkles, Sun, Target, Trash2, Undo2, Upload, Volume2, Wrench, X as XIcon, Zap
+    Sparkles, Trash2, Undo2, Wrench, X as XIcon, Zap
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -33,6 +33,9 @@ import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuo
 import { supabaseClient } from "./supabaseClient.js";
 import { reportsForOwner } from "./reportOwnership.js";
 import ThemedPicker from "./ThemedPicker.jsx";
+import { InkConfirmationSheet, InkGoalDial, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
+import { loadHomePreview, loadInkMotion, saveHomePreview, saveInkMotion } from "./inkMotion.js";
+import "./InkSettings.css";
 
 export { APP_VERSION };
 const VOICES = ["Leda", "Aoede", "Kore", "Despina", "Erinome", "Sulafat", "Achernar", "Charon", "Orus"];
@@ -164,40 +167,54 @@ function UpdateDetailsScreen({ releases, onBack, onApply, applying }) {
   );
 }
 
-function PfHead({ title, sub, onBack }) {
+function PfHead({ title, sub, onBack, compact = false }) {
   return (
-    <header className="pf-head">
+      <header className={`pf-head${compact ? " compact" : ""}`}>
       <button type="button" className="pf-head-back" onClick={onBack} aria-label="Back"><ChevronLeft size={20} /></button>
-      <div><h1>{title}</h1>{sub && <p>{sub}</p>}</div>
+        <div><h1>{title}</h1>{sub && <p>{sub}</p>}</div>
     </header>
   );
 }
 function SetSec({ title, children }) {
+  const chapter = { "You & your companion": "I", Appearance: "II", Voice: "III", Notifications: "IV", "Privacy & storage": "V", "Deleted books": "VI", "Reading limit": "VII", Backup: "VIII", App: "IX", "Danger zone": "X" }[title];
   return (
-    <Motion.section className="set-sec" initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-30px" }} transition={{ duration: 0.4, ease: "easeOut" }}>
-      {title && <h2><i />{title}</h2>}
+    <Motion.section className="set-sec ink-setting-chapter" initial={false}>
+      {title && <h2>{chapter && <span>{chapter}</span>}{title}<i /></h2>}
       {children}
     </Motion.section>
   );
 }
 function SetSwitchRow({ icon, label, hint, checked, disabled, onChange }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} className="set-row set-switch-row" onClick={() => onChange(!checked)} disabled={disabled}>
+    <button type="button" role="switch" aria-checked={checked} className="set-row set-switch-row" onClick={() => { if (disabled) return; navigator.vibrate?.(8); onChange(!checked); }} disabled={disabled}>
       <span className="set-row-ic">{icon}</span>
       <span className="set-row-tx"><b>{label}</b>{hint && <small>{hint}</small>}</span>
-      <span className={`switch ${checked ? "on" : ""}`} aria-hidden="true"><span className="switch-thumb" /></span>
+      <span className={`switch ink-switch-track ${checked ? "on" : ""}`} aria-hidden="true"><span className="switch-thumb" /></span>
     </button>
   );
 }
-function SetRow({ icon, label, hint, onClick, danger, trailing, chevron }) {
+function SetRow({ icon, label, hint, onClick, danger, trailing, chevron, className = "" }) {
   return (
-    <button type="button" className={`set-row ${danger ? "danger" : ""}`} onClick={onClick}>
+    <button type="button" className={`set-row ${danger ? "danger" : ""} ${className}`.trim()} onClick={onClick}>
       <span className="set-row-ic">{icon}</span>
       <span className="set-row-tx"><b>{label}</b>{hint && <small>{hint}</small>}</span>
       {trailing}
       {chevron && <ChevronRight size={16} />}
     </button>
   );
+}
+
+function ReadingLimitMeter({ quota }) {
+  if (!quota) return null;
+  const limitSeconds = Math.max(1, Number(quota.dailyLimitMinutes) * 60 || 1);
+  const usedSeconds = Math.min(limitSeconds, Math.max(0, Number(quota.usedSeconds) || 0));
+  const progress = usedSeconds / limitSeconds;
+  const circumference = 2 * Math.PI * 34;
+  return <div className="ink-limit-meter" role="img" aria-label={`${Math.floor(usedSeconds / 60)} minutes used of ${quota.dailyLimitMinutes} daily minutes; ${Math.floor(quota.remainingSeconds / 60)} minutes remain`}>
+    <svg viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="34" className="ink-limit-track" /><circle cx="42" cy="42" r="34" className="ink-limit-progress" style={{ strokeDasharray: circumference, strokeDashoffset: circumference * (1 - progress) }} /></svg>
+    <span><b>{Math.floor(quota.remainingSeconds / 60)}</b><small>min left</small></span>
+    <p>Daily limit is set by the developer. Contact us to request a change.</p>
+  </div>;
 }
 
 export function AccountScreen({ nav }) {
@@ -260,8 +277,12 @@ export function SettingsScreen({ nav, stores }) {
   const { profile, library, memory, gems } = stores;
   const [, bump] = useState(0);
   const [msg, setMsg] = useState("");
+  const [titleCompact, setTitleCompact] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
   const [voice, setVoice] = useState(profile.data.voice || "Leda");
   const [theme, setThemeState] = useState(profile.getTheme());
+  const [motion, setMotionState] = useState(loadInkMotion);
+  const [homePreview, setHomePreview] = useState(loadHomePreview);
   const [previewing, setPreviewing] = useState(false);
   const [updateDetailsOpen, setUpdateDetailsOpen] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -326,19 +347,31 @@ export function SettingsScreen({ nav, stores }) {
     flash(`"${book.displayTitle || book.title}" restored with its reading data.`);
   }
   function permanentlyDeleteBook(book) {
-    if (!window.confirm(`Permanently delete "${book.displayTitle || book.title}" and its archived gems and conversation history? This cannot be undone.`)) return;
-    if (!library.permanentlyDeleteBook(book.id)) return;
-    refreshDeletedBooks();
-    flash("Book and its archived data permanently deleted.");
+    requestConfirmation(`Permanently delete "${book.displayTitle || book.title}" and its archived gems and conversation history? This cannot be undone.`, () => {
+      if (!library.permanentlyDeleteBook(book.id)) return;
+      refreshDeletedBooks();
+      flash("Book and its archived data permanently deleted.");
+    });
   }
   const save = (k, v) => { profile.data[k] = v; profile._save(); bump((n) => n + 1); };
   const kb = Math.round(Object.keys(localStorage).reduce((s, k) => s + k.length + (localStorage.getItem(k) || "").length, 0) * 2 / 1024);
 
   function setTheme(next) {
     triggerLightTap();
-    setThemeState(next);
-    profile.setTheme(next);
-    document.documentElement.setAttribute("data-theme", next);
+    const apply = () => {
+      setThemeState(next);
+      profile.setTheme(next);
+      document.documentElement.setAttribute("data-theme", next);
+    };
+    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(apply);
+    else apply();
+  }
+  function updateMotion(next) {
+    setMotionState(saveInkMotion(next));
+    document.documentElement.dataset.motion = next;
+  }
+  function updateHomePreview(next) {
+    setHomePreview(saveHomePreview(next));
   }
   async function preview() {
     if (previewing) return;
@@ -390,27 +423,31 @@ export function SettingsScreen({ nav, stores }) {
     r.readAsText(file);
   }
   function clearChats() {
-    if (!window.confirm("Clear the saved conversation recaps for all books?")) return;
-    Object.keys(localStorage).forEach((k) => { if (k.startsWith("rc_convo_") || k === "reading_companion_openers") localStorage.removeItem(k); });
-    flash("Conversation history cleared"); bump((n) => n + 1);
+    requestConfirmation("Clear the saved conversation recaps for all books?", () => {
+      Object.keys(localStorage).forEach((k) => { if (k.startsWith("rc_convo_") || k === "reading_companion_openers") localStorage.removeItem(k); });
+      flash("Conversation history cleared"); bump((n) => n + 1);
+    });
   }
   function clearMemory() {
-    if (!window.confirm("Delete all saved preferences?")) return;
-    memory.memories = []; memory._save(); flash("Preferences cleared");
+    requestConfirmation("Delete all saved preferences?", () => {
+      memory.memories = []; memory._save(); flash("Preferences cleared");
+    });
   }
   function clearGems() {
-    if (!window.confirm("Delete ALL saved gems? This cannot be undone.")) return;
-    gems.gems = []; gems._save(); flash("Gems deleted"); bump((n) => n + 1);
+    requestConfirmation("Delete ALL saved gems? This cannot be undone.", () => {
+      gems.gems = []; gems._save(); flash("Gems deleted"); bump((n) => n + 1);
+    });
   }
   async function wipe() {
-    if (!window.confirm("Delete EVERYTHING (books, gems, memory, profile)? This cannot be undone.")) return;
-    try {
-      await nav.deleteAccountData?.();
-      localStorage.clear();
-      window.location.reload();
-    } catch (error) {
-      flash(error?.message || "Cloud data could not be deleted. Nothing on this device was cleared.");
-    }
+    requestConfirmation("Delete EVERYTHING (books, gems, memory, profile)? This cannot be undone.", async () => {
+      try {
+        await nav.deleteAccountData?.();
+        localStorage.clear();
+        window.location.reload();
+      } catch (error) {
+        flash(error?.message || "Cloud data could not be deleted. Nothing on this device was cleared.");
+      }
+    });
   }
   async function checkUpdate() {
     if (nav.updateAvailable) {
@@ -445,6 +482,24 @@ export function SettingsScreen({ nav, stores }) {
   useBackLayer(updateDetailsOpen, () => setUpdateDetailsOpen(false));
   useBackLayer(releaseNotesOpen, () => setReleaseNotesOpen(false));
   useBackLayer(deletedBooksOpen, () => setDeletedBooksOpen(false));
+  function requestConfirmation(message, action) {
+    setPendingConfirmation({ message, action });
+  }
+  function finishConfirmation() {
+    const action = pendingConfirmation?.action;
+    setPendingConfirmation(null);
+    if (action) void action();
+  }
+  useEffect(() => {
+    document.documentElement.dataset.motion = motion;
+  }, [motion]);
+  useEffect(() => {
+    const update = () => setTitleCompact(window.scrollY > 42);
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+    return () => window.removeEventListener("scroll", update);
+  }, []);
+  useBackLayer(Boolean(pendingConfirmation), () => setPendingConfirmation(null));
 
   if (updateDetailsOpen) {
     return (
@@ -467,7 +522,7 @@ export function SettingsScreen({ nav, stores }) {
 
   if (deletedBooksOpen) {
     return (
-      <div className="screen set-screen">
+      <div className="screen set-screen ink-scope">
         <div className="aurora-bg" />
         <PfHead title="Deleted books" sub={`${deletedBooks.length} ${deletedBooks.length === 1 ? "book" : "books"} in your bin`} onBack={() => setDeletedBooksOpen(false)} />
         <div className="set-body">
@@ -491,16 +546,16 @@ export function SettingsScreen({ nav, stores }) {
           </SetSec>
         </div>
         {msg && <div className="set-toast">{msg}</div>}
+        {pendingConfirmation && <InkConfirmationSheet message={pendingConfirmation.message} onCancel={() => setPendingConfirmation(null)} onConfirm={finishConfirmation} />}
       </div>
     );
   }
 
-  const usedPct = Math.min(100, Math.round((kb / 5120) * 100));
 
   return (
-    <div className="screen set-screen">
+    <div className="screen set-screen ink-scope">
       <div className="aurora-bg" />
-      <PfHead title="Settings" sub={`Version ${APP_VERSION}`} onBack={nav.goBack} />
+      <PfHead title="Settings" sub={`Version ${APP_VERSION}`} onBack={nav.goBack} compact={titleCompact} />
 
       <div className="set-body">
         <SetSec title="You & your companion">
@@ -513,12 +568,8 @@ export function SettingsScreen({ nav, stores }) {
               <small>What you call your reading friend</small>
             </label>
             <div className="set-field">
-              <div className="set-label"><Target size={16} /> Daily reading goal</div>
-              <div className="set-pills">
-                {GOALS.map((g) => (
-                  <Motion.button key={g} type="button" whileTap={{ scale: 0.94 }} transition={INTERACTION_SPRING} className={`set-pill ${profile.data.dailyGoal === g ? "on" : ""}`} onClick={() => { triggerLightTap(); save("dailyGoal", g); }}>{g}</Motion.button>
-                ))}
-              </div>
+              <div className="set-label"><InkIcon name="goal" size={17} /> Daily reading goal</div>
+              <InkGoalDial value={profile.data.dailyGoal || "20 min"} options={GOALS} onChange={(goal) => { triggerLightTap(); save("dailyGoal", goal); }} />
             </div>
           </div>
         </SetSec>
@@ -528,35 +579,37 @@ export function SettingsScreen({ nav, stores }) {
             <div className="set-themes" role="group" aria-label="Theme">
               <Motion.button type="button" whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} className={`set-theme ${theme === "light" ? "on" : ""}`} onClick={() => setTheme("light")}>
                 <span className="set-theme-art light"><i /><i /><b /></span>
-                <span><Sun size={14} /> Light</span>
+                <span><InkIcon name="sun" size={17} /> Light</span>
               </Motion.button>
               <Motion.button type="button" whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} className={`set-theme ${theme === "dark" ? "on" : ""}`} onClick={() => setTheme("dark")}>
                 <span className="set-theme-art dark"><i /><i /><b /></span>
-                <span><Moon size={14} /> Dark</span>
+                <span><InkIcon name="moon" size={17} /> Dark</span>
               </Motion.button>
             </div>
+            <div className="ink-setting-line"><span><b>Motion</b><small>Calm avoids ambient motion; Rich includes brief entry effects.</small></span><InkMotionControl value={motion} onChange={updateMotion} /></div>
+            <InkSwitch checked={homePreview} onChange={updateHomePreview} label="New Home (preview)" hint="Try the alternate desk layout. Your existing Home remains available by switching this off." />
           </div>
         </SetSec>
 
         <SetSec title="Voice">
           <div className="set-card">
-            <div className="set-label"><Volume2 size={16} /> Companion voice</div>
+            <div className="set-label"><InkIcon name="voice" size={18} /> Companion voice</div>
             <div className="set-voices" role="radiogroup" aria-label="Companion voice">
               {VOICES.map((v) => (
-                <button key={v} type="button" role="radio" aria-checked={voice === v} className={`set-pill ${voice === v ? "on" : ""}`} onClick={() => { triggerLightTap(); setVoice(v); save("voice", v); }}>{v}</button>
+                <button key={v} type="button" role="radio" aria-checked={voice === v} className={`set-pill ${voice === v ? "on" : ""}`} onClick={() => { triggerLightTap(); setVoice(v); save("voice", v); }}><InkIcon name="wave" size={17} className={previewing && voice === v ? "ink-wave-preview" : ""} />{v}</button>
               ))}
             </div>
             <small className="set-hint">Applies from your next session</small>
-            <button type="button" className="set-btn" onClick={preview} disabled={previewing}><Volume2 size={15} /> {previewing ? "Playing…" : "Preview this voice"}</button>
+            <button type="button" className="set-btn" onClick={preview} disabled={previewing}><InkIcon name="voice" size={16} /> {previewing ? "Playing…" : "Preview this voice"}</button>
           </div>
         </SetSec>
 
         <SetSec title="Notifications">
           <div className="set-card">
             <div className="set-rows">
-              <SetSwitchRow icon={<BellRing size={16} />} label="App updates & announcements" hint="New versions and important news, in your notification tray"
+              <SetSwitchRow icon={<InkIcon name="bell" size={17} />} label="App updates & announcements" hint="New versions and important news, in your notification tray"
                 checked={pushPrefs.announcements} disabled={pushBusy} onChange={(on) => updatePushPref("announcements", on)} />
-              <SetSwitchRow icon={<Clock3 size={16} />} label="Smart study reminders"
+              <SetSwitchRow icon={<InkIcon name="clock" size={17} />} label="Smart study reminders"
                 hint={studyPattern
                   ? `You usually read around ${formatClockMinute(studyPattern.typicalMinute)}. We'll nudge you at ${formatClockMinute(studyPattern.reminderMinute)}.`
                   : "We'll learn when you usually read and remind you just before. A few more sessions needed."}
@@ -570,55 +623,57 @@ export function SettingsScreen({ nav, stores }) {
 
         <SetSec title="Privacy & storage">
           <div className="set-card">
-            <div className="set-note"><Shield size={16} />
+            <div className="set-note"><InkIcon name="shield" size={17} />
               <span>Your books, gems, words and memories stay on this device and in your private account snapshot when sync is enabled. If Arena photo sharing is on, your cropped profile photo is stored in a private bucket and shown to signed-in Arena readers with an expiring link. During a session your voice, camera frames and page snapshots are sent to Google Gemini to generate replies.</span>
             </div>
             <div className="set-rows">
-              <SetSwitchRow icon={<ImagePlus size={16} />} label="Show my photo in the Arena" hint="Other signed-in readers see your photo. Turn this off to show initials instead." checked={arenaPhotoVisible} disabled={!nav.userId || arenaPhotoBusy} onChange={updateArenaPhotoPreference} />
+              <SetSwitchRow icon={<InkIcon name="image" size={17} />} label="Show my photo in the Arena" hint="Other signed-in readers see your photo. Turn this off to show initials instead." checked={arenaPhotoVisible} disabled={!nav.userId || arenaPhotoBusy} onChange={updateArenaPhotoPreference} />
             </div>
             {arenaPhotoError && <small className="set-hint set-push-error" role="alert">{arenaPhotoError}</small>}
-            <div className="set-meter">
-              <div className="set-meter-top"><b><HardDrive size={14} style={{ verticalAlign: "-2px" }} /> Storage used</b><span>{kb} KB on this device</span></div>
-              <div className="set-bar"><i style={{ width: `${Math.max(usedPct, 3)}%` }} /></div>
+              <div className="set-meter">
+              <div className="set-meter-top"><b><InkIcon name="layers" size={16} /> Storage used</b><span>{kb} KB on this device</span></div>
+              <InkShelfMeter value={kb} visualReference={1024} />
+              <small className="set-hint">No fixed storage cap is defined; the shelf is a visual scale.</small>
             </div>
             <div className="set-rows">
-              <SetRow icon={<Trash2 size={16} />} label="Clear conversation history" hint="Recaps used for continuity" onClick={clearChats} />
-              <SetRow icon={<Trash2 size={16} />} label="Clear saved preferences" onClick={clearMemory} />
-              <SetRow icon={<Trash2 size={16} />} label="Delete all gems" onClick={clearGems} />
+              <SetRow icon={<InkIcon name="trash" size={17} />} label="Clear conversation history" hint="Recaps used for continuity" onClick={clearChats} className="ink-row-danger" />
+              <SetRow icon={<InkIcon name="trash" size={17} />} label="Clear saved preferences" onClick={clearMemory} className="ink-row-danger" />
+              <SetRow icon={<InkIcon name="trash" size={17} />} label="Delete all gems" onClick={clearGems} className="ink-row-danger" />
             </div>
           </div>
         </SetSec>
 
         <SetSec title="Deleted books">
           <div className="set-card">
-            <div className="set-note"><Trash2 size={16} />
+            <div className="set-note"><InkIcon name="bin" size={17} />
               <span>Deleted books and their reading data are kept in a separate bin until you restore or permanently remove them.</span>
             </div>
-            <SetRow icon={<Trash2 size={16} />} label="Open deleted-books bin" hint={`${deletedBooks.length} ${deletedBooks.length === 1 ? "book" : "books"}`} onClick={() => setDeletedBooksOpen(true)} chevron />
+            <SetRow icon={<InkIcon name="bin" size={17} />} label="Open deleted-books bin" hint={`${deletedBooks.length} ${deletedBooks.length === 1 ? "book" : "books"}`} onClick={() => setDeletedBooksOpen(true)} chevron />
           </div>
         </SetSec>
 
         <SetSec title="Reading limit">
           <div className="set-card">
-            <div className="set-note"><Clock3 size={16} />
+            <div className="set-note"><InkIcon name="clock" size={17} />
               <span>{nav.readingQuota
                 ? `Your account allows ${nav.readingQuota.dailyLimitMinutes} minutes per UTC calendar day. ${Math.floor(nav.readingQuota.remainingSeconds / 60)} minutes remain today. Usage is tracked to your signed-in account.`
                 : nav.quotaError || "Loading your account reading limit…"}
               </span>
             </div>
+            {nav.readingQuota && <ReadingLimitMeter quota={nav.readingQuota} />}
             {nav.quotaError && <button type="button" className="st-btn" onClick={() => void nav.refreshReadingQuota?.().catch((error) => flash(error.message))}>Retry limit check</button>}
             <button type="button" className="st-btn" onClick={() => nav.openDeveloperEmail("limit_increase", {
               request: "I would like to request an increase to my daily reading time limit.",
             })}>
-              <Send size={15} /> Contact developer
+              <InkIcon name="send" size={16} /> Contact developer
             </button>
           </div>
         </SetSec>
 
         <SetSec title="Backup">
           <div className="set-duo">
-            <SetRow icon={<Download size={18} />} label="Export backup" hint="One JSON file" onClick={exportAll} />
-            <SetRow icon={<Upload size={18} />} label="Restore" hint="From a backup file" onClick={() => fileRef.current?.click()} />
+            <SetRow icon={<InkIcon name="download" size={19} />} label="Export backup" hint="One JSON file" onClick={exportAll} />
+            <SetRow icon={<InkIcon name="upload" size={19} />} label="Restore" hint="From a backup file" onClick={() => fileRef.current?.click()} />
           </div>
           <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }} />
         </SetSec>
@@ -626,20 +681,21 @@ export function SettingsScreen({ nav, stores }) {
         <SetSec title="App">
           <div className="set-card">
             <div className="set-rows">
-              <SetRow icon={<RefreshCw size={16} />} label="Check for updates" hint={checkingUpdate ? "Checking for a newer version…" : `Version ${APP_VERSION}`} onClick={checkUpdate}
+              <SetRow icon={<InkIcon name="refresh" size={17} />} label="Check for updates" hint={checkingUpdate ? "Checking for a newer version…" : `Version ${APP_VERSION}`} onClick={checkUpdate}
                 trailing={nav.updateAvailable ? <span className="set-update-dot" aria-label="1 update available">1</span> : null} />
-              <SetRow icon={<Sparkles size={16} />} label="Version & release notes" hint="See what’s new in Reading Companion" onClick={() => setReleaseNotesOpen(true)}
+              <SetRow icon={<InkIcon name="sparkle" size={17} />} label="Version & release notes" hint="See what’s new in Reading Companion" onClick={() => setReleaseNotesOpen(true)}
                 trailing={<span className="set-version">v{APP_VERSION}</span>} chevron />
             </div>
           </div>
         </SetSec>
 
         <SetSec title="Danger zone">
-          <SetRow icon={<Trash2 size={16} />} label="Delete all my data" hint="Books, gems, memory and profile" onClick={wipe} danger />
+          <SetRow icon={<InkIcon name="trash" size={17} />} label="Delete all my data" hint="Books, gems, memory and profile" onClick={wipe} danger className="ink-row-danger" />
         </SetSec>
       </div>
 
       {msg && <div className="set-toast">{msg}</div>}
+      {pendingConfirmation && <InkConfirmationSheet message={pendingConfirmation.message} onCancel={() => setPendingConfirmation(null)} onConfirm={finishConfirmation} />}
     </div>
   );
 }

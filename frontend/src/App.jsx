@@ -36,19 +36,14 @@ import {
     BookMarked,
     BookOpen,
     Brain,
-    Bug,
     Camera as CameraIcon,
     CameraOff,
     Check,
     ChevronRight,
     Clock,
-    Cloud,
-    Copy,
-    Fingerprint,
     Download,
     Flame,
     Gem,
-    Home,
     Image as ImageIcon,
     Info,
     Library as LibraryIcon,
@@ -66,7 +61,6 @@ import {
     RefreshCw,
     ScanText,
     Search,
-    Settings as SettingsIcon,
     Sparkles,
     // Sun,
     Trash2,
@@ -158,7 +152,6 @@ import DeveloperEmailSheet from "./DeveloperEmailSheet.jsx";
 import "./ProfileUI.css";
 import "./ProfileCard.css";
 import AvatarCropper from "./AvatarCropper";
-import ProfileFloaters from "./ProfileFloaters";
 import { findApproxSpokenVariant } from "./pronunciationObservation.js";
 import ServiceNotice from "./ServiceNotice.jsx";
 import { getRecap, saveTurn } from "./sessionMemory.js";
@@ -175,10 +168,16 @@ import UpdateManager from "./UpdateManager.jsx";
 import { useBookAura } from "./useBookAura.js";
 import { useButtonHaptics, useHaptic } from "./useHaptic.js";
 import { APP_VERSION } from "./version.js";
+import { InkIcon } from "./InkIcons.jsx";
+import { loadInkMotion } from "./inkMotion.js";
+import { InkStamp } from "./InkPrimitives.jsx";
+import { useInkAmbientMotion } from "./useInkAmbientMotion.js";
+import "./InkProfile.css";
 
 const MODEL_NAME = "gemini-3.1-flash-live-preview";
 const FALLBACK_MODEL_NAME = "gemini-2.5-flash-native-audio-preview-12-2025";
 const LEGACY_STREAMING = import.meta.env.VITE_SESSION_STREAMING_LEGACY === "true";
+const InkGallery = lazy(() => import("./InkGallery.jsx"));
 const FOLLOWUP_MIC_MS = 8_000;
 const RESUME_WINDOW_MS = 2 * 60 * 60_000;
 const SILENCE_CHECK_MS = 4 * 60 * 1000;
@@ -477,6 +476,9 @@ class ErrorBoundary extends Component {
 }
 
 function AppCore() {
+  useEffect(() => {
+    document.documentElement.dataset.motion = loadInkMotion();
+  }, []);
   const account = useAccount();
   useButtonHaptics();
   const [screen, setScreen] = useState("dashboard");
@@ -938,6 +940,9 @@ function AppCore() {
 }
 
 export default function App() {
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).get("ui-v3-gallery") === "1") {
+    return <Suspense fallback={<div className="ink-gallery">Loading UI gallery…</div>}><InkGallery /></Suspense>;
+  }
   return (
     <>
       <NetworkOfflineCurtain />
@@ -1093,21 +1098,21 @@ function BottomNav({ active, onNavigate, badges = {} }) {
     return () => observer.disconnect();
   }, []);
   const items = [
-    { id: "dashboard", Icon: Home, label: "Home" },
-    { id: "library", Icon: LibraryIcon, label: "Library" },
-    { id: "gems", Icon: Gem, label: "Gems" },
-    { id: "memory", Icon: Brain, label: "Memory" },
+    { id: "dashboard", icon: "home", label: "Home" },
+    { id: "library", icon: "library", label: "Library" },
+    { id: "gems", icon: "gems", label: "Gems" },
+    { id: "memory", icon: "memory", label: "Memory" },
   ];
   return (
     <div className="bottom-nav-shell">
       <nav ref={navRef} className="bottom-nav elevated">
-        {items.map(({ id, Icon, label }) => (
-          <Motion.button key={id} className={`nav-item ${active === id ? "active" : ""}`} whileTap={{ scale: 0.9 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate(id); }}>
-            <span className="nav-icon-box"><Icon size={28} strokeWidth={active === id ? 2.4 : 1.8} /></span>
+        {items.map(({ id, icon, label }) => (
+          <Motion.button key={id} className={`nav-item ${active === id ? "active" : ""}`} whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate(id); }}>
+            <span className="nav-icon-box"><InkIcon name={icon} size={24} /></span>
             <span className="nav-label">{label}</span>
           </Motion.button>
         ))}
-        <Motion.button className={`nav-item ${active === "profile" ? "active" : ""}`} whileTap={{ scale: 0.9 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate("profile"); }}>
+        <Motion.button className={`nav-item ${active === "profile" ? "active" : ""}`} whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate("profile"); }}>
           <span className="nav-icon-box">
             <span className="nav-avatar">{renderAvatar(22)}</span>
             {badges.profile > 0 && <span className="rc-badge" aria-label={`${badges.profile} pending`}>{badges.profile}</span>}
@@ -2793,8 +2798,20 @@ function ProfileScreen({ nav }) {
   const [cropFile, setCropFile] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [uidCopied, setUidCopied] = useState(false);
+  const [arenaRank, setArenaRank] = useState(null);
+  const [seenStampIds] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("rc_passport_seen_stamps") || "[]");
+      return Array.isArray(stored) ? stored : [];
+    } catch { return []; }
+  });
   const arenaAvatarSyncRef = useRef(Promise.resolve());
   const arenaAvatarSignatureRef = useRef("");
+  const companionPerchRef = useRef(null);
+  const perchActive = useInkAmbientMotion(companionPerchRef, true);
+  const currentStreak = profileStore.getStreak();
+  const savedGems = gemsStore.list().length;
+  const startedBooks = library.listBooks().length;
 
   useEffect(() => {
     if (!nav.userId) return undefined;
@@ -2827,6 +2844,24 @@ function ProfileScreen({ nav }) {
     });
     return undefined;
   }, [nav.userId, profileAvatar]);
+
+  const passportStamps = [
+    { id: "streak-3", label: "3-day flame", description: "Earned after reading on three consecutive days.", earned: currentStreak >= 3, icon: "flame" },
+    { id: "streak-7", label: "7-day flame", description: "Earned after reading on seven consecutive days.", earned: currentStreak >= 7, icon: "flame" },
+    { id: "streak-30", label: "30-day flame", description: "Earned after reading on thirty consecutive days.", earned: currentStreak >= 30, icon: "star" },
+    { id: "arena-rank", label: arenaRank ? `Rank #${arenaRank.rank}` : "Arena rank", description: "Earned when a weekly Arena rank is available.", earned: Boolean(arenaRank), icon: "arena" },
+    { id: "first-gem", label: "First gem", description: "Earned after saving at least one gem.", earned: savedGems > 0, icon: "gem" },
+    { id: "first-book", label: "First book", description: "Earned after adding a book to your library.", earned: startedBooks > 0, icon: "book" },
+  ];
+  const earnedStampIds = passportStamps.filter((stamp) => stamp.earned).map((stamp) => stamp.id);
+  const earnedStampKey = JSON.stringify(earnedStampIds);
+  useEffect(() => {
+    const earnedIds = JSON.parse(earnedStampKey);
+    const next = [...new Set([...seenStampIds, ...earnedIds])];
+    if (next.length !== seenStampIds.length) {
+      try { localStorage.setItem("rc_passport_seen_stamps", JSON.stringify(next)); } catch { /* stamps remain visual-only */ }
+    }
+  }, [earnedStampKey, seenStampIds]);
 
   function handleAvatarPick(e) {
     const file = e.target.files?.[0];
@@ -2865,32 +2900,47 @@ function ProfileScreen({ nav }) {
   const rise = (i) => ({ initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.45, delay: 0.06 * i, ease: "easeOut" } });
 
   return (
-    <div className="screen pf-screen">
+    <div className="screen pf-screen ink-scope">
       <div className="aurora-bg" />
 
-      <Motion.section className="pc" {...rise(0)}>
+      <Motion.section className="pc passport-card" {...rise(0)} onPointerMove={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const shift = ((event.clientX - bounds.left) / bounds.width - 0.5) * 12;
+        event.currentTarget.style.setProperty("--foil-shift", `${shift}px`);
+      }} onPointerDown={(event) => {
+        const perch = event.currentTarget.querySelector(".passport-perch");
+        if (!perch) return;
+        const bounds = perch.getBoundingClientRect();
+        const lookX = Math.max(-3, Math.min(3, ((event.clientX - bounds.left) / bounds.width - 0.5) * 6));
+        const lookY = Math.max(-2, Math.min(2, ((event.clientY - bounds.top) / bounds.height - 0.5) * 4));
+        perch.style.setProperty("--gaze-x", `${lookX}px`);
+        perch.style.setProperty("--gaze-y", `${lookY}px`);
+      }} onPointerLeave={(event) => event.currentTarget.style.setProperty("--foil-shift", "0px")}>
         <span className="pc-rim" aria-hidden="true" />
-        <ProfileFloaters />
-        <div className="pc-badge">Reader profile</div>
+        <span className="passport-foil" aria-hidden="true" />
+        <div className="pc-badge"><InkIcon name="bookplate" size={16} /> Reader passport</div>
 
         <div className="pc-stage">
         <div className="pc-avatar">
-          <span className="pc-ripples" aria-hidden="true"><i /><i /><i /></span>
+          <svg className="passport-wreath" viewBox="0 0 150 150" aria-hidden="true"><circle cx="75" cy="75" r="69" /><path d="M27 91c-8-26 0-48 25-59m71 59c8-26 0-48-25-59M35 92l-9 4 6-11m8 19-10 2 8-9m8 14-10 0 9-7m68-2 9 4-6-11m-8 19 10 2-8-9m-8 14 10 0-9-7" /><path d="M52 31c7-5 15-7 23-7s16 2 23 7" /></svg>
           <button type="button" className="pc-photo" onClick={() => fileInputRef.current?.click()} aria-label="Change photo">
             {renderAvatar(34)}
           </button>
           <button type="button" className="pc-cam" onClick={() => fileInputRef.current?.click()} aria-label="Upload photo">
-            <CameraIcon size={13} />
+            <InkIcon name="image" size={17} />
           </button>
           <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAvatarPick} />
         </div>
         </div>
 
-        <input className="pc-name" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} onBlur={() => profileStore.setName(name)} aria-label="Your name" />
+        <div className="passport-name-row"><input className="pc-name" style={{ fontSize: name.length > 24 ? 20 : name.length > 18 ? 24 : 30 }} value={name} maxLength={30} onChange={(e) => setName(e.target.value)} onBlur={() => profileStore.setName(name)} aria-label="Your name" /><span className="passport-gem-badge"><InkIcon name="gem" size={15} />{savedGems} gems</span></div>
+        <div className="passport-stamps" aria-label="Reader milestones">{passportStamps.map((stamp) => <InkStamp key={`${stamp.id}-${stamp.earned}`} label={stamp.label} description={stamp.description} icon={stamp.icon} earned={stamp.earned} seen={seenStampIds.includes(stamp.id)} />)}</div>
+        <p className="passport-stamp-note">Streaks: 3, 7 &amp; 30 consecutive days · first book · first gem · Arena rank</p>
+        <div ref={companionPerchRef} className={`passport-perch${perchActive && loadInkMotion() === "rich" ? " active" : ""}`}><span className="passport-perch-gaze"><MascotCharacter characterId={mascot} size={42} animated={false} /></span><span>YOUR COMPANION</span></div>
         {nav.userId && <div className="pc-uid">
-          <span><Fingerprint size={14} aria-hidden="true" /><b>UID:</b><code>{nav.userId}</code></span>
+          <span><InkIcon name="fingerprint" size={16} /><b>Library card</b><i aria-hidden="true" /><code title={nav.userId}>{nav.userId}</code></span>
           <button type="button" onClick={copyUserId} aria-label={uidCopied ? "User ID copied" : "Copy user ID"}>
-            {uidCopied ? <Check size={14} /> : <Copy size={14} />}{uidCopied && <small aria-live="polite">Copied</small>}
+            {uidCopied ? <InkIcon name="check" size={16} /> : <InkIcon name="copy" size={16} />}{uidCopied && <small aria-live="polite">COPIED</small>}
           </button>
         </div>}
 
@@ -2946,7 +2996,7 @@ function ProfileScreen({ nav }) {
             <Motion.button
               key={id}
               type="button"
-              whileTap={{ scale: 0.94 }}
+              whileTap={{ scale: 0.97 }}
               className={`pf-companion ${mascot === id ? "on" : ""}`}
               onClick={() => { setMascot(id); forceUpdate((n) => n + 1); }}
               aria-label={`Choose ${id} mascot`}
@@ -2954,37 +3004,39 @@ function ProfileScreen({ nav }) {
             >
               <MascotCharacter characterId={id} size={46} animated={false} />
               <i aria-hidden="true" />
+              <span className="pf-companion-name">{id}</span>
             </Motion.button>
           ))}
         </div>
       </Motion.section>
 
       <Motion.section className="pf-bento" {...rise(4)}>
-        <ReaderArenaEntry onOpen={nav.goReaderRanking} />
+        <ReaderArenaEntry onOpen={nav.goReaderRanking} onRankChange={setArenaRank} />
         <button type="button" className="pf-tile account" onClick={nav.goAccount}>
-          <span className="pf-tile-ic"><Cloud size={21} /></span>
+          <span className="pf-tile-ic"><InkIcon name="cloud" size={22} /></span>
           <span className="pf-tile-text">
             <b>Account</b>
             <small>{nav.accountEmail} · {nav.accountSyncStatus === "syncing" ? "Syncing" : nav.accountSyncStatus === "error" ? "Sync needs attention" : "Cloud backup active"}</small>
           </span>
+          <i className={`passport-sync-dot ${nav.accountSyncStatus || "ready"}`} aria-label={nav.accountSyncStatus === "syncing" ? "Syncing" : nav.accountSyncStatus === "error" ? "Sync needs attention" : "Synced"} />
           <ChevronRight size={18} className="pf-tile-go" />
         </button>
         <button type="button" className="pf-tile settings" onClick={nav.goSettings}>
-          <span className="pf-tile-ic"><SettingsIcon size={22} /></span>
+          <span className="pf-tile-ic"><InkIcon name="settings" size={22} /></span>
           <span className="pf-tile-text"><b>Settings</b><small>Theme, voice, backup, privacy</small></span>
           {nav.badges?.settings > 0 && <span className="rc-badge" aria-label={`${nav.badges.settings} pending`}>{nav.badges.settings}</span>}
           <ChevronRight size={18} className="pf-tile-go" />
         </button>
         <button type="button" className="pf-tile report" onClick={nav.goReport}>
-          <span className="pf-tile-ic"><Bug size={20} /></span>
+          <span className="pf-tile-ic"><InkIcon name="bug" size={21} /></span>
           <span className="pf-tile-text"><b>Report an issue</b><small>Bugs and ideas</small></span>
         </button>
         <button type="button" className="pf-tile help" onClick={nav.goHelp}>
-          <span className="pf-tile-ic"><MessageCircleMore size={21} /></span>
+          <span className="pf-tile-ic"><InkIcon name="help" size={22} /></span>
           <span className="pf-tile-text"><b>Help &amp; guide</b><small>Find your way around</small></span>
         </button>
         <button type="button" className="pf-tile about" onClick={nav.goAbout}>
-          <span className="pf-tile-ic"><Info size={20} /></span>
+          <span className="pf-tile-ic"><InkIcon name="info" size={21} /></span>
           <span className="pf-tile-text"><b>About</b><small>Why this exists & Who has built this</small></span>
         </button>
         {docsUnlocked && <DocsAccessCard userId={nav.userId} readerName={nav.readerName} onOpen={nav.goDocs} onContact={nav.openDeveloperEmail} />}
