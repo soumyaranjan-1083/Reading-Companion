@@ -3,6 +3,8 @@ import { InkIcon } from "./InkIcons.jsx";
 import { createHoldConfirmController, moveInkGoal, saveInkMotion, toggleInkSwitch } from "./inkMotion.js";
 import "./InkUI.css";
 
+export { InkIcon };
+
 export function InkCard({ as: Element = "section", className = "", children, ...props }) {
   return <Element className={`ink-card ${className}`.trim()} {...props}>{children}</Element>;
 }

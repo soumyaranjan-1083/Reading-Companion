@@ -33,7 +33,7 @@ import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuo
 import { supabaseClient } from "./supabaseClient.js";
 import { reportsForOwner } from "./reportOwnership.js";
 import ThemedPicker from "./ThemedPicker.jsx";
-import { InkConfirmationSheet, InkGoalDial, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
+import { InkConfirmationSheet, InkGoalDial, InkHoldConfirmButton, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
 import { loadHomePreview, loadInkMotion, saveHomePreview, saveInkMotion } from "./inkMotion.js";
 import "./InkSettings.css";
 
@@ -275,6 +275,8 @@ export function AccountScreen({ nav }) {
 // ======================= SETTINGS =======================
 export function SettingsScreen({ nav, stores }) {
   const { profile, library, memory, gems } = stores;
+  const _inkHoldConfirmButton = InkHoldConfirmButton;
+  void _inkHoldConfirmButton;
   const [, bump] = useState(0);
   const [msg, setMsg] = useState("");
   const [titleCompact, setTitleCompact] = useState(false);
