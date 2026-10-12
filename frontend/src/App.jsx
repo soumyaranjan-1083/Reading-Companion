@@ -44,6 +44,7 @@ import {
     Download,
     Flame,
     Gem,
+    Home,
     Image as ImageIcon,
     Info,
     Library as LibraryIcon,
@@ -1098,21 +1099,21 @@ function BottomNav({ active, onNavigate, badges = {} }) {
     return () => observer.disconnect();
   }, []);
   const items = [
-    { id: "dashboard", icon: "home", label: "Home" },
-    { id: "library", icon: "library", label: "Library" },
-    { id: "gems", icon: "gems", label: "Gems" },
-    { id: "memory", icon: "memory", label: "Memory" },
+    { id: "dashboard", Icon: Home, label: "Home" },
+    { id: "library", Icon: LibraryIcon, label: "Library" },
+    { id: "gems", Icon: Gem, label: "Gems" },
+    { id: "memory", Icon: Brain, label: "Memory" },
   ];
   return (
     <div className="bottom-nav-shell">
       <nav ref={navRef} className="bottom-nav elevated">
-        {items.map(({ id, icon, label }) => (
-          <Motion.button key={id} className={`nav-item ${active === id ? "active" : ""}`} whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate(id); }}>
-            <span className="nav-icon-box"><InkIcon name={icon} size={24} /></span>
+        {items.map(({ id, Icon, label }) => (
+          <Motion.button key={id} className={`nav-item ${active === id ? "active" : ""}`} whileTap={{ scale: 0.9 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate(id); }}>
+            <span className="nav-icon-box"><Icon size={28} strokeWidth={active === id ? 2.4 : 1.8} /></span>
             <span className="nav-label">{label}</span>
           </Motion.button>
         ))}
-        <Motion.button className={`nav-item ${active === "profile" ? "active" : ""}`} whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate("profile"); }}>
+        <Motion.button className={`nav-item ${active === "profile" ? "active" : ""}`} whileTap={{ scale: 0.9 }} transition={INTERACTION_SPRING} onClick={() => { triggerLightTap(); onNavigate("profile"); }}>
           <span className="nav-icon-box">
             <span className="nav-avatar">{renderAvatar(22)}</span>
             {badges.profile > 0 && <span className="rc-badge" aria-label={`${badges.profile} pending`}>{badges.profile}</span>}

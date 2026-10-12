@@ -110,7 +110,7 @@ function RankingRow({ reader, readers, index, onSelect, paused, reduceMotion, le
         transition={{ duration: paused ? 0 : reduceMotion ? 0.12 : 0.24, delay: paused || reduceMotion ? 0 : Math.min(index * 0.02, 0.18) }}
         aria-label={readerAccessibleLabel(reader)}
       >
-        <span className="arena-row-rank">{`#${reader.rank ?? "–"}`}{tied ? <span className="arena-tie-mark" aria-label="Tied rank">=</span> : null}</span>
+        <span className="arena-row-rank">{reader.rank == null ? "—" : `#${reader.rank}`}{tied ? <span className="arena-tie-mark" aria-label="Tied rank">=</span> : null}</span>
         <ReaderAvatar reader={reader} size="row" />
         <span className="arena-row-main">
           <span className="arena-row-name"><span className="arena-row-name-text">{reader.name}</span>{reader.isYou && <span className="arena-you-tag">YOU</span>}</span>
@@ -164,6 +164,7 @@ export default function ReaderArena({ onBack, onLibrary }) {
   const [waitingVisible, setWaitingVisible] = useState(50);
   const [animateEntrance, setAnimateEntrance] = useState(true);
   const touchStart = useRef(null);
+  const rosterScrollRef = useRef(null);
   const sheetTouchStart = useRef(null);
   const sheetRef = useRef(null);
   const entranceTimer = useRef(null);
@@ -276,6 +277,7 @@ export default function ReaderArena({ onBack, onLibrary }) {
     setRacedVisible(50);
     setWaitingVisible(50);
     setPeriod(nextPeriod);
+    if (rosterScrollRef.current) rosterScrollRef.current.scrollTop = 0;
   }
 
   function handleTabKeyDown(event) {
@@ -381,20 +383,22 @@ export default function ReaderArena({ onBack, onLibrary }) {
                   <button type="button" className="arena-invite" onClick={inviteFriend}><Share2 size={16} /> Invite a friend to race</button>
                   {inviteMessage && <span className="arena-invite-status" aria-live="polite">{inviteMessage}</span>}
                 </div>}
-                {rows.length > 0 && <section className="arena-rows-scroll" aria-label="Reader rankings">
-                  <div className="arena-list-heading"><span>THE FIELD</span><span>{rows.length} {rows.length === 1 ? "reader" : "readers"} · ranks follow reading time; ties share rank</span></div>
-                  <ol className="arena-rows" aria-label="Readers ranked by reading time">
-                    {rows.slice(0, racedVisible).map((reader, index) => <RankingRow key={reader.key} reader={reader} readers={activeRankings} index={index} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} leaderSeconds={leader?.totalSeconds || 0} entrance={animateEntrance} />)}
-                  </ol>
-                  {rows.length > racedVisible && <button type="button" className="arena-load-more" onClick={() => setRacedVisible((value) => value + 50)}>Load next 50 readers</button>}
-                </section>}
-                {notStarted.length > 0 && <section className="arena-rows-scroll arena-not-started" aria-label="Readers who have not started this week">
-                  <div className="arena-list-heading"><span>HAVEN&apos;T STARTED THIS WEEK</span><span>{notStarted.length} {notStarted.length === 1 ? "reader" : "readers"} · ranked after active readers</span></div>
-                  <ol className="arena-rows" aria-label="Readers with zero weekly reading time">
-                    {notStarted.slice(0, waitingVisible).map((reader, index) => <RankingRow key={reader.key} reader={reader} readers={notStarted} index={index} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} notStarted entrance={animateEntrance} />)}
-                  </ol>
-                  {notStarted.length > waitingVisible && <button type="button" className="arena-load-more" onClick={() => setWaitingVisible((value) => value + 50)}>Load next 50 readers</button>}
-                </section>}
+                {(rows.length > 0 || notStarted.length > 0) && <div ref={rosterScrollRef} className="arena-roster-scroll" aria-label="Reader rankings">
+                  {rows.length > 0 && <section aria-label="Readers who have started this week">
+                    <div className="arena-list-heading"><span>THE FIELD</span><span>{rows.length} {rows.length === 1 ? "reader" : "readers"} · ranks follow reading time; ties share rank</span></div>
+                    <ol className="arena-rows" aria-label="Readers ranked by reading time">
+                      {rows.slice(0, racedVisible).map((reader, index) => <RankingRow key={reader.key} reader={reader} readers={activeRankings} index={index} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} leaderSeconds={leader?.totalSeconds || 0} entrance={animateEntrance} />)}
+                    </ol>
+                    {rows.length > racedVisible && <button type="button" className="arena-load-more" onClick={() => setRacedVisible((value) => value + 50)}>Load next 50 readers</button>}
+                  </section>}
+                  {notStarted.length > 0 && <section className="arena-not-started" aria-label="Readers who have not started this week">
+                    <div className="arena-list-heading"><span>HAVEN&apos;T STARTED THIS WEEK</span><span>{notStarted.length} {notStarted.length === 1 ? "reader" : "readers"} · ranked after active readers</span></div>
+                    <ol className="arena-rows" aria-label="Readers with zero weekly reading time">
+                      {notStarted.slice(0, waitingVisible).map((reader, index) => <RankingRow key={reader.key} reader={reader} readers={notStarted} index={index} onSelect={selectReader} paused={!visible} reduceMotion={reduceMotion} notStarted entrance={animateEntrance} />)}
+                    </ol>
+                    {notStarted.length > waitingVisible && <button type="button" className="arena-load-more" onClick={() => setWaitingVisible((value) => value + 50)}>Load next 50 readers</button>}
+                  </section>}
+                </div>}
               </Motion.div>
           )}
         </main>

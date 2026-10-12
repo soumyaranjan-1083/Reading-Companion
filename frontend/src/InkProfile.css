@@ -1,6 +1,6 @@
 .pf-screen.ink-scope {
   gap: 20px;
-  padding: calc(18px + env(safe-area-inset-top, 0px)) 18px calc(var(--bottom-nav-h, 68px) + 28px + env(safe-area-inset-bottom, 0px));
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 18px calc(var(--bottom-nav-h, 72px) + 16px + env(safe-area-inset-bottom, 0px));
   font-family: "Space Grotesk", sans-serif;
 }
 .pf-screen.ink-scope > .aurora-bg { display: none; }
