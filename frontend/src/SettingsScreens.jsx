@@ -17,10 +17,6 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiFetchFast } from "./api.js";
 import { useBackLayer } from "./backStack.js";
-import MajorReleaseCard from "./MajorRelease.jsx";
-import CatalogCard from "./CatalogCard.jsx";
-import ReaderArenaReleaseCard from "./ReaderArenaReleaseCard.jsx";
-import SteadyPagesReleaseCard from "./SteadyPagesReleaseCard.jsx";
 import { useGeminiVoiceDriver } from "./onboarding/avatarDriver.js";
 import { applyPushPrefs, collectSessionStarts, currentPushEndpoint, computeStudyPattern, formatClockMinute, loadPushPrefs, notificationPermission, pushErrorMessage } from "./pushNotifications.js";
 import { getReleaseHistory, normalizeReportStatus } from "./reportIssueHelpers.js";
@@ -57,6 +53,50 @@ function Group({ title, children }) {
 
 const versionKey = (value) => String(value || "").trim().replace(/^v/i, "");
 
+function releaseHue(version) {
+  const [major = 0, minor = 0, patch = 0] = String(version || "0.0.0").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  return (major * 97 + minor * 43 + patch * 17) % 360;
+}
+
+function ReleaseHighlight({ item, index }) {
+  const Icon = item.type === "fix" ? Bug : item.type === "improve" ? Wrench : Sparkles;
+  return <li className="release-highlight" style={{ "--release-index": index }}><span><Icon size={16} /></span><p>{item.text}</p></li>;
+}
+
+function LatestReleaseCard({ release, target }) {
+  const hue = releaseHue(release.version);
+  return <article className={`release-hero${target ? " is-target" : ""}`} id={`release-${versionKey(release.version)}`} style={{ "--release-hue": `${hue}deg` }}>
+    <span className="release-hero-wash" aria-hidden="true" />
+    <span className="release-foil-sweep" aria-hidden="true" />
+    <span className="release-new-ribbon">NEW</span>
+    <div className="release-hero-meta"><span className="release-date-chip">{release.date || "Recently updated"}</span><span className="release-hero-label">LATEST RELEASE</span></div>
+    <div className="release-version-emboss" data-version={`v${release.version}`} aria-label={`Version ${release.version}`}>v{release.version}</div>
+    <h2>{release.title || `Version ${release.version}`}</h2>
+    {release.subtitle && <p className="release-hero-subtitle">{release.subtitle}</p>}
+    <ul className="release-highlights latest-highlights">{(release.items || []).map((item, index) => <ReleaseHighlight key={`${release.version}-${index}`} item={item} index={index} />)}</ul>
+  </article>;
+}
+
+function ReleaseTimelineCard({ release, highlighted = false }) {
+  const [open, setOpen] = useState(highlighted);
+  const hue = releaseHue(release.version);
+  const detailsId = `release-details-${versionKey(release.version)}`;
+  return <article id={`release-${versionKey(release.version)}`} data-version={versionKey(release.version)} className={`release-timeline-entry${highlighted ? " is-target" : ""}`} style={{ "--release-hue": `${hue}deg` }}>
+    <span className="release-timeline-node" aria-hidden="true" />
+    <button type="button" className="release-timeline-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((value) => !value)}>
+      <span className="release-version-tag">v{release.version}</span>
+      <span className="release-timeline-title"><b>{release.title || `Version ${release.version}`}</b><small>{release.date || "Recently updated"}</small></span>
+      <InkIcon name="chevron" size={17} className={open ? "expanded" : ""} />
+    </button>
+    <div id={detailsId} className={`release-timeline-details${open ? " open" : ""}`} aria-hidden={!open} inert={!open}>
+      <div className="release-timeline-inner">
+        {release.subtitle && <p className="release-timeline-subtitle">{release.subtitle}</p>}
+        <ul className="release-highlights">{(release.items || []).map((item, index) => <ReleaseHighlight key={`${release.version}-${index}`} item={item} index={index} />)}</ul>
+      </div>
+    </div>
+  </article>;
+}
+
 function ReleaseNotesScreen({ releases, onBack, highlightVersion = null }) {
   const target = versionKey(highlightVersion);
   const hasTarget = Boolean(target) && releases.some((release) => versionKey(release.version) === target);
@@ -67,54 +107,22 @@ function ReleaseNotesScreen({ releases, onBack, highlightVersion = null }) {
     }, 220);
     return () => window.clearTimeout(timer);
   }, [hasTarget, target]);
+  const latest = releases[0] || null;
+  const olderReleases = latest ? releases.slice(1) : [];
   return (
-    <div className="screen set-screen">
+    <div className="screen set-screen ink-scope release-notes-screen">
       <div className="aurora-bg" />
       <PfHead title="Version & release notes" sub={`Current version ${APP_VERSION}`} onBack={onBack} />
       <div className="set-body">
-      <SetSec title="Release history">
+      <SetSec title="Latest release">
         {target && releases.length > 0 && !hasTarget && (
           <div className="st-note"><Sparkles size={15} /><span>Notes for v{target} are not published yet. Here is the full release history.</span></div>
         )}
         {releases.length === 0 ? (
           <div className="st-note"><Sparkles size={15} /><span>Release notes are loading or not available yet.</span></div>
-        ) : (
-          <div className="st-release-list">
-            {releases.map((release, releaseIndex) => (
-              <Motion.article
-                key={`${release.version}-${release.date || "release"}`}
-                id={`release-${versionKey(release.version)}`}
-                data-version={versionKey(release.version)}
-                className={`st-release-entry${hasTarget && versionKey(release.version) === target ? " is-target" : ""}`}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: Math.min(releaseIndex * 0.07, 0.35), duration: 0.28, ease: "easeOut" }}
-              >
-                <span className="st-release-node" aria-hidden="true" />
-                {release.steadyPages ? <SteadyPagesReleaseCard release={release} /> : release.arena ? <ReaderArenaReleaseCard release={release} /> : release.catalog ? <CatalogCard release={release} /> : release.major || release.ui || release.pulse ? <MajorReleaseCard release={release} variant={release.pulse ? "pulse" : release.ui ? "ui" : "major"} /> : (
-                <div className="st-release elevated">
-                  <div className="st-release-head">
-                    <div>
-                      <b>{release.title || `Version ${release.version}`}</b>
-                      <small>{release.date || "Recently updated"}</small>
-                    </div>
-                    <span>v{release.version}</span>
-                  </div>
-                  <div className="st-release-cards">
-                    {(release.items || []).map((item, index) => (
-                      <div key={`${release.version}-${index}`} className={`st-release-card st-release-card-${index % 4}`}>
-                        <span className="st-release-card-mark" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-                        <p>{item.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                )}
-              </Motion.article>
-            ))}
-          </div>
-        )}
+        ) : <LatestReleaseCard release={latest} target={hasTarget && versionKey(latest.version) === target} />}
       </SetSec>
+      {olderReleases.length > 0 && <SetSec title="Previous releases"><div className="release-timeline">{olderReleases.map((release) => <ReleaseTimelineCard key={`${release.version}-${release.date || "release"}`} release={release} highlighted={hasTarget && versionKey(release.version) === target} />)}</div></SetSec>}
       </div>
     </div>
   );
