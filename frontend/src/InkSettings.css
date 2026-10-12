@@ -39,7 +39,6 @@
 .set-screen.ink-scope .set-input { min-height: 48px; border: 1px solid var(--ink-line); border-radius: 10px; color: var(--ink-text); background: var(--ink-raised); font: 500 15px/1.4 "Space Grotesk",sans-serif; }
 .set-screen.ink-scope .set-input:focus { border-color: var(--ink-aqua); box-shadow: 0 0 0 3px color-mix(in srgb,var(--ink-aqua) 17%,transparent); }
 .set-screen.ink-scope .ink-goal { padding-top: 4px; }
-.set-screen.ink-scope .set-themes { gap: 8px; }
 .set-screen.ink-scope .ink-theme-switch { display: grid; width: 100%; min-height: 58px; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--ink-line); border-radius: 11px; color: var(--ink-text); text-align: left; background: var(--ink-raised); cursor: pointer; }
 .set-screen.ink-scope .ink-theme-switch:active { transform: scale(.985); }
 .set-screen.ink-scope .ink-theme-switch-icons { display: flex; align-items: center; gap: 4px; color: var(--ink-violet); }
@@ -50,15 +49,6 @@
 .set-screen.ink-scope .ink-theme-switch-track.light i { transform: translateX(24px); }
 .set-screen.ink-scope .ink-setting-chapter.is-revealed { animation: ink-chapter-reveal 220ms ease-out both; }
 @keyframes ink-chapter-reveal { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-.set-screen.ink-scope .set-theme { min-height: 44px; flex-direction: row; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--ink-line); border-radius: 10px; color: var(--ink-text); background: var(--ink-raised); }
-.set-screen.ink-scope .set-theme.on { border-color: var(--ink-aqua); box-shadow: inset 0 0 0 1px var(--ink-aqua); }
-.set-screen.ink-scope .set-theme > span { font-size: 13px; }
-.set-screen.ink-scope .set-theme-art { width: 28px; height: 24px; flex: 0 0 28px; border-radius: 6px; }
-.set-screen.ink-scope .set-theme-art i { top: 5px; left: 4px; right: 9px; height: 3px; }
-.set-screen.ink-scope .set-theme-art i + i { top: 11px; right: 13px; height: 2px; }
-.set-screen.ink-scope .set-theme-art b { right: 4px; bottom: 4px; width: 7px; height: 7px; }
-.set-screen.ink-scope .set-theme-art.light { background: linear-gradient(150deg,#FBF6EC,#F3ECDD); }
-.set-screen.ink-scope .set-theme-art.dark { background: linear-gradient(150deg,#0A0918,#231F45); }
 .set-screen.ink-scope .ink-setting-line { border-color: var(--ink-line); }
 .set-screen.ink-scope .set-label .ink-icon { color: var(--ink-violet); }
 .set-screen.ink-scope .set-voices { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }

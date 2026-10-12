@@ -151,7 +151,6 @@ import { clearArenaAvatar, fetchReadingQuota, recordReadingUsage, uploadArenaAva
 import ReaderArenaEntry from "./ReaderArenaEntry.jsx";
 import DeveloperEmailSheet from "./DeveloperEmailSheet.jsx";
 import "./ProfileUI.css";
-import "./ProfileCard.css";
 import AvatarCropper from "./AvatarCropper";
 import { findApproxSpokenVariant } from "./pronunciationObservation.js";
 import ServiceNotice from "./ServiceNotice.jsx";
