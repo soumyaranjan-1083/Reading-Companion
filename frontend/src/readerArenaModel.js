@@ -41,7 +41,7 @@ export function buildWeeklyArenaData(readers) {
   const raced = readers.filter((reader) => Number(reader.weeklySeconds ?? (reader.rank == null ? 0 : reader.totalSeconds)) > 0)
     .map((reader) => ({ ...reader, totalSeconds: Number(reader.weeklySeconds ?? reader.totalSeconds), rank: reader.weeklyRank ?? reader.rank }));
   const notStarted = readers.filter((reader) => Number(reader.weeklySeconds ?? (reader.rank == null ? 0 : reader.totalSeconds)) <= 0)
-    .map((reader) => ({ ...reader, totalSeconds: 0, rank: reader.weeklyRank ?? reader.rank ?? null }))
+    .map((reader) => ({ ...reader, totalSeconds: 0, rank: null }))
     .sort((left, right) => Number(left.allTimeRank || Number.MAX_SAFE_INTEGER) - Number(right.allTimeRank || Number.MAX_SAFE_INTEGER)
       || String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }));
   return { raced, notStarted, racedCount: raced.length };
@@ -107,6 +107,7 @@ export function getArenaAvatarUrl(reader, failedUrl = "") {
 }
 
 export function getTieMark(readers, reader) {
+  if (reader.rank == null) return "";
   return readers.filter((entry) => entry.rank === reader.rank).length > 1 ? "=" : "";
 }
 

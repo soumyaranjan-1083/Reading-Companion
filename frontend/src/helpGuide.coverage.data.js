@@ -232,16 +232,16 @@ export const HELP_FEATURE_MANIFEST = [
     includes: ["Check for updates", "Version & release notes", "See what’s new in Reading Companion"],
   },
   {
-    name: "Reader Arena release card",
+    name: "Reader Arena release history",
     entryId: "release-2-4-0",
-    files: ["SettingsScreens.jsx", "ReaderArenaReleaseCard.jsx", "ReaderArenaReleaseCard.css", "../public/release-notes.json"],
-    includes: ["release.arena ? <ReaderArenaReleaseCard release={release} />", "arena-release-crown", "prefers-reduced-motion: reduce", "Reader Arena & Honest Eyes"],
+    files: ["SettingsScreens.jsx", "InkSettings.css", "../public/release-notes.json"],
+    includes: ["function ReleaseTimelineCard", "function releaseHue", "release.items || []", "Reader Arena & Honest Eyes"],
   },
   {
-    name: "Gem Studio 2.5.0 release card",
+    name: "Gem Studio release history",
     entryId: "release-2-5-0",
-    files: ["ReaderArenaReleaseCard.jsx", "ReaderArenaReleaseCard.css", "../public/release-notes.json"],
-    includes: ["release.gemStudio", "Gem Studio release", "studio-gem-orbit", "studio-release-sheen", "Every Line, Reimagined"],
+    files: ["SettingsScreens.jsx", "InkSettings.css", "../public/release-notes.json"],
+    includes: ["function LatestReleaseCard", "function ReleaseTimelineCard", "release-foil-sweep", "Every Line, Reimagined"],
   },
   {
     name: "report issue workflow",

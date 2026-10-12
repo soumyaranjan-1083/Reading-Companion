@@ -1,6 +1,10 @@
 export const INK_MOTION_KEY = "rc_ui_v3_motion";
 export const INK_HOME_PREVIEW_KEY = "rc_ui_v3_home_preview";
 
+let homePreviewSnapshot = null;
+const homePreviewListeners = new Set();
+let listeningForStorage = false;
+
 export function defaultInkMotion({ reducedMotion = false, deviceMemory } = {}) {
   return reducedMotion || (Number.isFinite(deviceMemory) && deviceMemory <= 4) ? "calm" : "rich";
 }
@@ -28,9 +32,40 @@ export function loadHomePreview(storage = globalThis.localStorage) {
   try { return storage?.getItem(INK_HOME_PREVIEW_KEY) === "true"; } catch { return false; }
 }
 
+function currentHomePreview() {
+  if (homePreviewSnapshot === null) homePreviewSnapshot = loadHomePreview();
+  return homePreviewSnapshot;
+}
+
+function emitHomePreviewChange() {
+  homePreviewListeners.forEach((listener) => listener());
+}
+
+function onHomePreviewStorage(event) {
+  if (event.key !== INK_HOME_PREVIEW_KEY && event.key !== null) return;
+  homePreviewSnapshot = loadHomePreview();
+  emitHomePreviewChange();
+}
+
+export function subscribeHomePreview(listener) {
+  homePreviewListeners.add(listener);
+  if (!listeningForStorage && typeof window !== "undefined") {
+    window.addEventListener("storage", onHomePreviewStorage);
+    listeningForStorage = true;
+  }
+  return () => homePreviewListeners.delete(listener);
+}
+
+export function getHomePreviewSnapshot() {
+  return currentHomePreview();
+}
+
 export function saveHomePreview(enabled, storage = globalThis.localStorage) {
   const next = Boolean(enabled);
   try { storage?.setItem(INK_HOME_PREVIEW_KEY, String(next)); } catch { /* preference remains active for this view */ }
+  const changed = currentHomePreview() !== next;
+  homePreviewSnapshot = next;
+  if (changed) emitHomePreviewChange();
   return next;
 }
 

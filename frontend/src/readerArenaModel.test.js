@@ -69,7 +69,7 @@ test("reduced motion removes rise, count-up, and idle effects", () => {
   assert.equal(getArenaMotionSettings(false).rise, true);
 });
 
-test("weekly roster shows raced readers first and zero-time readers with tied weekly ranks", () => {
+test("weekly roster shows raced readers first and leaves zero-time readers unranked", () => {
   const data = buildWeeklyArenaData([
     { rank: 2, weeklyRank: 2, weeklySeconds: 60, allTimeRank: 1, name: "Asha" },
     { rank: 1, weeklyRank: 1, weeklySeconds: 120, allTimeRank: 3, name: "Noor" },
@@ -78,9 +78,19 @@ test("weekly roster shows raced readers first and zero-time readers with tied we
   ]);
   assert.equal(data.racedCount, 2);
   assert.deepEqual(data.raced.map((reader) => reader.name), ["Asha", "Noor"]);
-  assert.deepEqual(data.notStarted.map((reader) => [reader.name, reader.totalSeconds, reader.rank]), [["Ravi", 0, 3], ["Nia", 0, 3]]);
-  assert.equal(readerAccessibleLabel(data.notStarted[0]), "Rank 3, Ravi, 0s");
-  assert.match(getArenaRowClassName(data.notStarted[0]), /top-ten/);
+  assert.deepEqual(data.notStarted.map((reader) => [reader.name, reader.totalSeconds, reader.rank]), [["Ravi", 0, null], ["Nia", 0, null]]);
+  assert.equal(readerAccessibleLabel(data.notStarted[0]), "Ravi, has not started this week, 0s");
+  assert.equal(getTieMark(data.notStarted, data.notStarted[0]), "");
+  assert.doesNotMatch(getArenaRowClassName(data.notStarted[0]), /top-ten/);
+});
+
+test("zero-minute weekly readers stay unranked even if the API supplies a shared rank", () => {
+  const { notStarted } = buildWeeklyArenaData([
+    { name: "A", weeklySeconds: 0, weeklyRank: 1, rank: 1 },
+    { name: "B", weeklySeconds: 0, weeklyRank: 1, rank: 1 },
+  ]);
+  assert.deepEqual(notStarted.map((reader) => reader.rank), [null, null]);
+  assert.equal(getTieMark(notStarted, notStarted[0]), "");
 });
 
 test("Arena roster model handles both periods at 0, 1, 2, 3, 10, and 100 readers", () => {
@@ -120,9 +130,19 @@ test("profile sheet stays above bottom navigation and honors reduced motion", ()
   assert.doesNotMatch(component, /selectedReader\.(?:email|uid|userId)/);
 });
 
-test("podium crown has scroll clearance on both tabs", () => {
+test("podium crown renders outside its stage without dead header padding", () => {
   const css = readFileSync(new URL("./ReaderArena.css", import.meta.url), "utf8");
   const phoneRules = css.slice(css.indexOf("@media (min-width: 360px) and (max-width: 430px)"));
-  assert.match(phoneRules, /\.arena-content\s*\{[^}]*padding-top:\s*26px/);
-  assert.match(phoneRules, /\.arena-stage\s*\{[^}]*padding-top:\s*28px; overflow:\s*visible/);
+  assert.match(phoneRules, /\.arena-stage\s*\{[^}]*overflow:\s*visible/);
+  assert.doesNotMatch(phoneRules, /\.arena-content\s*\{[^}]*padding-top:\s*26px/);
+});
+
+test("Arena uses a viewport-height flex layout and a single flexible roster scroller", () => {
+  const css = readFileSync(new URL("./ReaderArena.css", import.meta.url), "utf8");
+  const component = readFileSync(new URL("./ReaderArena.jsx", import.meta.url), "utf8");
+  assert.match(css, /\.arena-screen\s*\{[^}]*height:\s*100dvh/);
+  assert.match(css, /\.arena-roster-scroll\s*\{[^}]*flex:\s*1 1 0;[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto/);
+  assert.doesNotMatch(css, /\.arena-not-started\s*\{[^}]*max-height/);
+  assert.match(component, /className="arena-roster-scroll"/);
+  assert.match(component, /scrollTop\s*=\s*0/);
 });

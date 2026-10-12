@@ -13,15 +13,10 @@ import {
     Shield,
     Sparkles, Trash2, Undo2, Wrench, X as XIcon, Zap
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiFetchFast } from "./api.js";
 import { useBackLayer } from "./backStack.js";
-import MajorReleaseCard from "./MajorRelease.jsx";
-import CatalogCard from "./CatalogCard.jsx";
-import ReaderArenaReleaseCard from "./ReaderArenaReleaseCard.jsx";
-import SteadyPagesReleaseCard from "./SteadyPagesReleaseCard.jsx";
-import { INTERACTION_SPRING } from "./motionConfig.js";
 import { useGeminiVoiceDriver } from "./onboarding/avatarDriver.js";
 import { applyPushPrefs, collectSessionStarts, currentPushEndpoint, computeStudyPattern, formatClockMinute, loadPushPrefs, notificationPermission, pushErrorMessage } from "./pushNotifications.js";
 import { getReleaseHistory, normalizeReportStatus } from "./reportIssueHelpers.js";
@@ -33,8 +28,8 @@ import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuo
 import { supabaseClient } from "./supabaseClient.js";
 import { reportsForOwner } from "./reportOwnership.js";
 import ThemedPicker from "./ThemedPicker.jsx";
-import { InkConfirmationSheet, InkGoalDial, InkHoldConfirmButton, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
-import { loadHomePreview, loadInkMotion, saveHomePreview, saveInkMotion } from "./inkMotion.js";
+import { InkConfirmationSheet, InkGoalDial, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
+import { getHomePreviewSnapshot, loadInkMotion, saveHomePreview, saveInkMotion, subscribeHomePreview } from "./inkMotion.js";
 import "./InkSettings.css";
 
 export { APP_VERSION };
@@ -58,6 +53,50 @@ function Group({ title, children }) {
 
 const versionKey = (value) => String(value || "").trim().replace(/^v/i, "");
 
+function releaseHue(version) {
+  const [major = 0, minor = 0, patch = 0] = String(version || "0.0.0").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  return (major * 97 + minor * 43 + patch * 17) % 360;
+}
+
+function ReleaseHighlight({ item, index }) {
+  const Icon = item.type === "fix" ? Bug : item.type === "improve" ? Wrench : Sparkles;
+  return <li className="release-highlight" style={{ "--release-index": index }}><span><Icon size={16} /></span><p>{item.text}</p></li>;
+}
+
+function LatestReleaseCard({ release, target }) {
+  const hue = releaseHue(release.version);
+  return <article className={`release-hero${target ? " is-target" : ""}`} id={`release-${versionKey(release.version)}`} style={{ "--release-hue": `${hue}deg` }}>
+    <span className="release-hero-wash" aria-hidden="true" />
+    <span className="release-foil-sweep" aria-hidden="true" />
+    <span className="release-new-ribbon">NEW</span>
+    <div className="release-hero-meta"><span className="release-date-chip">{release.date || "Recently updated"}</span><span className="release-hero-label">LATEST RELEASE</span></div>
+    <div className="release-version-emboss" data-version={`v${release.version}`} aria-label={`Version ${release.version}`}>v{release.version}</div>
+    <h2>{release.title || `Version ${release.version}`}</h2>
+    {release.subtitle && <p className="release-hero-subtitle">{release.subtitle}</p>}
+    <ul className="release-highlights latest-highlights">{(release.items || []).map((item, index) => <ReleaseHighlight key={`${release.version}-${index}`} item={item} index={index} />)}</ul>
+  </article>;
+}
+
+function ReleaseTimelineCard({ release, highlighted = false }) {
+  const [open, setOpen] = useState(highlighted);
+  const hue = releaseHue(release.version);
+  const detailsId = `release-details-${versionKey(release.version)}`;
+  return <article id={`release-${versionKey(release.version)}`} data-version={versionKey(release.version)} className={`release-timeline-entry${highlighted ? " is-target" : ""}`} style={{ "--release-hue": `${hue}deg` }}>
+    <span className="release-timeline-node" aria-hidden="true" />
+    <button type="button" className="release-timeline-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((value) => !value)}>
+      <span className="release-version-tag">v{release.version}</span>
+      <span className="release-timeline-title"><b>{release.title || `Version ${release.version}`}</b><small>{release.date || "Recently updated"}</small></span>
+      <InkIcon name="chevron" size={17} className={open ? "expanded" : ""} />
+    </button>
+    <div id={detailsId} className={`release-timeline-details${open ? " open" : ""}`} aria-hidden={!open} inert={!open}>
+      <div className="release-timeline-inner">
+        {release.subtitle && <p className="release-timeline-subtitle">{release.subtitle}</p>}
+        <ul className="release-highlights">{(release.items || []).map((item, index) => <ReleaseHighlight key={`${release.version}-${index}`} item={item} index={index} />)}</ul>
+      </div>
+    </div>
+  </article>;
+}
+
 function ReleaseNotesScreen({ releases, onBack, highlightVersion = null }) {
   const target = versionKey(highlightVersion);
   const hasTarget = Boolean(target) && releases.some((release) => versionKey(release.version) === target);
@@ -68,54 +107,22 @@ function ReleaseNotesScreen({ releases, onBack, highlightVersion = null }) {
     }, 220);
     return () => window.clearTimeout(timer);
   }, [hasTarget, target]);
+  const latest = releases[0] || null;
+  const olderReleases = latest ? releases.slice(1) : [];
   return (
-    <div className="screen set-screen">
+    <div className="screen set-screen ink-scope release-notes-screen">
       <div className="aurora-bg" />
       <PfHead title="Version & release notes" sub={`Current version ${APP_VERSION}`} onBack={onBack} />
       <div className="set-body">
-      <SetSec title="Release history">
+      <SetSec title="Latest release">
         {target && releases.length > 0 && !hasTarget && (
           <div className="st-note"><Sparkles size={15} /><span>Notes for v{target} are not published yet. Here is the full release history.</span></div>
         )}
         {releases.length === 0 ? (
           <div className="st-note"><Sparkles size={15} /><span>Release notes are loading or not available yet.</span></div>
-        ) : (
-          <div className="st-release-list">
-            {releases.map((release, releaseIndex) => (
-              <Motion.article
-                key={`${release.version}-${release.date || "release"}`}
-                id={`release-${versionKey(release.version)}`}
-                data-version={versionKey(release.version)}
-                className={`st-release-entry${hasTarget && versionKey(release.version) === target ? " is-target" : ""}`}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: Math.min(releaseIndex * 0.07, 0.35), duration: 0.28, ease: "easeOut" }}
-              >
-                <span className="st-release-node" aria-hidden="true" />
-                {release.steadyPages ? <SteadyPagesReleaseCard release={release} /> : release.arena ? <ReaderArenaReleaseCard release={release} /> : release.catalog ? <CatalogCard release={release} /> : release.major || release.ui || release.pulse ? <MajorReleaseCard release={release} variant={release.pulse ? "pulse" : release.ui ? "ui" : "major"} /> : (
-                <div className="st-release elevated">
-                  <div className="st-release-head">
-                    <div>
-                      <b>{release.title || `Version ${release.version}`}</b>
-                      <small>{release.date || "Recently updated"}</small>
-                    </div>
-                    <span>v{release.version}</span>
-                  </div>
-                  <div className="st-release-cards">
-                    {(release.items || []).map((item, index) => (
-                      <div key={`${release.version}-${index}`} className={`st-release-card st-release-card-${index % 4}`}>
-                        <span className="st-release-card-mark" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-                        <p>{item.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                )}
-              </Motion.article>
-            ))}
-          </div>
-        )}
+        ) : <LatestReleaseCard release={latest} target={hasTarget && versionKey(latest.version) === target} />}
       </SetSec>
+      {olderReleases.length > 0 && <SetSec title="Previous releases"><div className="release-timeline">{olderReleases.map((release) => <ReleaseTimelineCard key={`${release.version}-${release.date || "release"}`} release={release} highlighted={hasTarget && versionKey(release.version) === target} />)}</div></SetSec>}
       </div>
     </div>
   );
@@ -177,8 +184,21 @@ function PfHead({ title, sub, onBack, compact = false }) {
 }
 function SetSec({ title, children }) {
   const chapter = { "You & your companion": "I", Appearance: "II", Voice: "III", Notifications: "IV", "Privacy & storage": "V", "Deleted books": "VI", "Reading limit": "VII", Backup: "VIII", App: "IX", "Danger zone": "X" }[title];
+  const sectionRef = useRef(null);
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || !title || typeof IntersectionObserver === "undefined") return undefined;
+    const root = section.closest(".set-screen");
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      section.classList.add("is-revealed");
+      observer.disconnect();
+    }, { root, threshold: 0.04 });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [title]);
   return (
-    <Motion.section className="set-sec ink-setting-chapter" initial={false}>
+    <Motion.section ref={sectionRef} className="set-sec ink-setting-chapter" initial={false}>
       {title && <h2>{chapter && <span>{chapter}</span>}{title}<i /></h2>}
       {children}
     </Motion.section>
@@ -275,8 +295,6 @@ export function AccountScreen({ nav }) {
 // ======================= SETTINGS =======================
 export function SettingsScreen({ nav, stores }) {
   const { profile, library, memory, gems } = stores;
-  const _inkHoldConfirmButton = InkHoldConfirmButton;
-  void _inkHoldConfirmButton;
   const [, bump] = useState(0);
   const [msg, setMsg] = useState("");
   const [titleCompact, setTitleCompact] = useState(false);
@@ -284,7 +302,7 @@ export function SettingsScreen({ nav, stores }) {
   const [voice, setVoice] = useState(profile.data.voice || "Leda");
   const [theme, setThemeState] = useState(profile.getTheme());
   const [motion, setMotionState] = useState(loadInkMotion);
-  const [homePreview, setHomePreview] = useState(loadHomePreview);
+  const homePreview = useSyncExternalStore(subscribeHomePreview, getHomePreviewSnapshot, () => false);
   const [previewing, setPreviewing] = useState(false);
   const [updateDetailsOpen, setUpdateDetailsOpen] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -301,6 +319,7 @@ export function SettingsScreen({ nav, stores }) {
   const { triggerLightTap } = useHaptic();
   const drv = useGeminiVoiceDriver({ voiceName: voice });
   const fileRef = useRef(null);
+  const settingsScreenRef = useRef(null);
 
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 2800); };
   function refreshDeletedBooks() {
@@ -358,22 +377,32 @@ export function SettingsScreen({ nav, stores }) {
   const save = (k, v) => { profile.data[k] = v; profile._save(); bump((n) => n + 1); };
   const kb = Math.round(Object.keys(localStorage).reduce((s, k) => s + k.length + (localStorage.getItem(k) || "").length, 0) * 2 / 1024);
 
-  function setTheme(next) {
+  function setTheme(next, event) {
     triggerLightTap();
     const apply = () => {
       setThemeState(next);
       profile.setTheme(next);
       document.documentElement.setAttribute("data-theme", next);
     };
-    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(apply);
-    else apply();
+    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const bounds = event?.currentTarget?.getBoundingClientRect();
+      if (bounds) {
+        document.documentElement.style.setProperty("--theme-origin-x", `${bounds.left + bounds.width / 2}px`);
+        document.documentElement.style.setProperty("--theme-origin-y", `${bounds.top + bounds.height / 2}px`);
+      }
+      document.startViewTransition(apply);
+    } else if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.classList.add("theme-switch-fallback");
+      apply();
+      window.setTimeout(() => document.documentElement.classList.remove("theme-switch-fallback"), 240);
+    } else apply();
   }
   function updateMotion(next) {
     setMotionState(saveInkMotion(next));
     document.documentElement.dataset.motion = next;
   }
   function updateHomePreview(next) {
-    setHomePreview(saveHomePreview(next));
+    saveHomePreview(next);
   }
   async function preview() {
     if (previewing) return;
@@ -495,12 +524,6 @@ export function SettingsScreen({ nav, stores }) {
   useEffect(() => {
     document.documentElement.dataset.motion = motion;
   }, [motion]);
-  useEffect(() => {
-    const update = () => setTitleCompact(window.scrollY > 42);
-    window.addEventListener("scroll", update, { passive: true });
-    update();
-    return () => window.removeEventListener("scroll", update);
-  }, []);
   useBackLayer(Boolean(pendingConfirmation), () => setPendingConfirmation(null));
 
   if (updateDetailsOpen) {
@@ -555,7 +578,7 @@ export function SettingsScreen({ nav, stores }) {
 
 
   return (
-    <div className="screen set-screen ink-scope">
+    <div ref={settingsScreenRef} className="screen set-screen ink-scope" onScroll={(event) => setTitleCompact(event.currentTarget.scrollTop > 42)}>
       <div className="aurora-bg" />
       <PfHead title="Settings" sub={`Version ${APP_VERSION}`} onBack={nav.goBack} compact={titleCompact} />
 
@@ -571,23 +594,18 @@ export function SettingsScreen({ nav, stores }) {
             </label>
             <div className="set-field">
               <div className="set-label"><InkIcon name="goal" size={17} /> Daily reading goal</div>
-              <InkGoalDial value={profile.data.dailyGoal || "20 min"} options={GOALS} onChange={(goal) => { triggerLightTap(); save("dailyGoal", goal); }} />
+              <InkGoalDial value={profile.data.dailyGoal || "20 min"} options={GOALS} onChange={(goal) => save("dailyGoal", goal)} />
             </div>
           </div>
         </SetSec>
 
         <SetSec title="Appearance">
           <div className="set-card">
-            <div className="set-themes" role="group" aria-label="Theme">
-              <Motion.button type="button" whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} className={`set-theme ${theme === "light" ? "on" : ""}`} onClick={() => setTheme("light")}>
-                <span className="set-theme-art light"><i /><i /><b /></span>
-                <span><InkIcon name="sun" size={17} /> Light</span>
-              </Motion.button>
-              <Motion.button type="button" whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} className={`set-theme ${theme === "dark" ? "on" : ""}`} onClick={() => setTheme("dark")}>
-                <span className="set-theme-art dark"><i /><i /><b /></span>
-                <span><InkIcon name="moon" size={17} /> Dark</span>
-              </Motion.button>
-            </div>
+            <button type="button" className="ink-theme-switch" role="switch" aria-label="Theme" aria-checked={theme === "light"} onClick={(event) => setTheme(theme === "light" ? "dark" : "light", event)}>
+              <span className="ink-theme-switch-icons"><InkIcon name="sun" size={19} /><InkIcon name="moon" size={18} /></span>
+              <span className="ink-theme-switch-value">{theme === "light" ? "Light" : "Dark"}</span>
+              <span className={`ink-theme-switch-track ${theme === "light" ? "light" : "dark"}`} aria-hidden="true"><i /></span>
+            </button>
             <div className="ink-setting-line"><span><b>Motion</b><small>Calm avoids ambient motion; Rich includes brief entry effects.</small></span><InkMotionControl value={motion} onChange={updateMotion} /></div>
             <InkSwitch checked={homePreview} onChange={updateHomePreview} label="New Home (preview)" hint="Try the alternate desk layout. Your existing Home remains available by switching this off." />
           </div>
