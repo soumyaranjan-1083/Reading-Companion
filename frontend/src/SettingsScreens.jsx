@@ -13,7 +13,7 @@ import {
     Shield,
     Sparkles, Trash2, Undo2, Wrench, X as XIcon, Zap
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, apiFetchFast } from "./api.js";
 import { useBackLayer } from "./backStack.js";
@@ -34,7 +34,7 @@ import { supabaseClient } from "./supabaseClient.js";
 import { reportsForOwner } from "./reportOwnership.js";
 import ThemedPicker from "./ThemedPicker.jsx";
 import { InkConfirmationSheet, InkGoalDial, InkHoldConfirmButton, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
-import { loadHomePreview, loadInkMotion, saveHomePreview, saveInkMotion } from "./inkMotion.js";
+import { getHomePreviewSnapshot, loadInkMotion, saveHomePreview, saveInkMotion, subscribeHomePreview } from "./inkMotion.js";
 import "./InkSettings.css";
 
 export { APP_VERSION };
@@ -284,7 +284,7 @@ export function SettingsScreen({ nav, stores }) {
   const [voice, setVoice] = useState(profile.data.voice || "Leda");
   const [theme, setThemeState] = useState(profile.getTheme());
   const [motion, setMotionState] = useState(loadInkMotion);
-  const [homePreview, setHomePreview] = useState(loadHomePreview);
+  const homePreview = useSyncExternalStore(subscribeHomePreview, getHomePreviewSnapshot, () => false);
   const [previewing, setPreviewing] = useState(false);
   const [updateDetailsOpen, setUpdateDetailsOpen] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -373,7 +373,7 @@ export function SettingsScreen({ nav, stores }) {
     document.documentElement.dataset.motion = next;
   }
   function updateHomePreview(next) {
-    setHomePreview(saveHomePreview(next));
+    saveHomePreview(next);
   }
   async function preview() {
     if (previewing) return;

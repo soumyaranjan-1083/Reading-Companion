@@ -73,7 +73,7 @@ import {
     WifiOff,
     X as XIcon
 } from "lucide-react";
-import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useAccount } from "./AccountContext.js";
 import AccountGate from "./AccountGate.jsx";
@@ -170,7 +170,7 @@ import { useBookAura } from "./useBookAura.js";
 import { useButtonHaptics, useHaptic } from "./useHaptic.js";
 import { APP_VERSION } from "./version.js";
 import { InkIcon } from "./InkIcons.jsx";
-import { loadInkMotion } from "./inkMotion.js";
+import { getHomePreviewSnapshot, loadInkMotion, saveHomePreview, subscribeHomePreview } from "./inkMotion.js";
 import { InkStamp } from "./InkPrimitives.jsx";
 import { useInkAmbientMotion } from "./useInkAmbientMotion.js";
 import "./InkProfile.css";
@@ -179,6 +179,7 @@ const MODEL_NAME = "gemini-3.1-flash-live-preview";
 const FALLBACK_MODEL_NAME = "gemini-2.5-flash-native-audio-preview-12-2025";
 const LEGACY_STREAMING = import.meta.env.VITE_SESSION_STREAMING_LEGACY === "true";
 const InkGallery = lazy(() => import("./InkGallery.jsx"));
+const HomePreview = lazy(() => import("./HomePreview.jsx"));
 const FOLLOWUP_MIC_MS = 8_000;
 const RESUME_WINDOW_MS = 2 * 60 * 60_000;
 const SILENCE_CHECK_MS = 4 * 60 * 1000;
@@ -1622,6 +1623,7 @@ function BookProgressList({ rows }) {
 }
 
 function DashboardScreen({ nav }) {
+  const homePreview = useSyncExternalStore(subscribeHomePreview, getHomePreviewSnapshot, () => false);
   const books = library.listBooks();
   const stats = library.getStats();
   const gemsList = gemsStore.list();
@@ -1665,6 +1667,38 @@ const topItems = wordRows.slice(0, 5).map((r) => ({ label: r.book.title, value: 
 const restWords = wordRows.slice(5).reduce((s, r) => s + r.words, 0);
 const donutItems = restWords > 0 ? [...topItems, { label: "Other books", value: restWords, color: "#94a3b8" }] : topItems;
   const recent = rows.filter((r, i) => i === 0 || now - new Date(r.book.lastReadAt).getTime() < 7 * 86400000).slice(0, 3);
+
+  if (homePreview) {
+    return <Suspense fallback={<div className="screen home-preview-loading" role="status">Setting the reading desk…</div>}>
+      <HomePreview
+        nav={nav}
+        mascot={mascot}
+        mascotLine={mascotLine.line}
+        onMascotTap={unlocked ? mascotSpeak : mascotLine.next}
+        mascotTalking={voice.speaking}
+        mascotLevelRef={voice.levelRef}
+        name={profileStore.data.name}
+        streak={profileStore.getStreak()}
+        streakDays={profileStore.getLast7Days()}
+        books={stats.totalBooks}
+        words={stats.totalWords}
+        wordsThisWeek={thisWeek}
+        weekDelta={thisWeek - prevWeek}
+        gems={gemsList.length}
+        vocabData={areaData}
+        range={range}
+        onRangeChange={(nextRange) => { triggerLightTap(); setRange(nextRange); }}
+        percent={percent}
+        gemBars={gemBars}
+        donutItems={donutItems}
+        bookRows={rows.slice(0, 6)}
+        recent={recent}
+        recallCard={<WeeklyRecallCard books={books.map((book) => library.getBook(book.id)).filter(Boolean)} />}
+        onSwitchBack={() => saveHomePreview(false)}
+        onStatTap={triggerLightTap}
+      />
+    </Suspense>;
+  }
 
   return (
     <div className="screen dashboard-screen">
