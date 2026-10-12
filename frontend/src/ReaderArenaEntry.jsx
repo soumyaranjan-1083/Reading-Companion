@@ -63,10 +63,8 @@ export default function ReaderArenaEntry({ onOpen, onRankChange }) {
         <span className="arena-entry-diorama"><i /><i /><i /><b>{rank ? `#${rank.rank}` : "·"}</b></span>
       </span>
       <span className="pf-tile-text arena-entry-copy">
-        <span className="arena-entry-kicker">THE READING RACE</span>
-        <b>Reader Arena</b>
-        <small>{rank ? <><i className="arena-live-dot" /> You’re #{rank.rank} this week</> : loaded ? "Join the race" : "Finding your place…"}</small>
-        <span className="arena-reset-line">Resets in {formatWeekCountdown(now)}</span>
+      <b>{rank ? <>You’re #{rank.rank} this week</> : "Reader Arena"}</b>
+      <small>{rank ? "" : loaded ? "Join the race · " : "Finding your place · "}Resets in {formatWeekCountdown(now)}</small>
       </span>
       <InkIcon name="chevron" size={19} className="pf-tile-go" />
     </Motion.button>

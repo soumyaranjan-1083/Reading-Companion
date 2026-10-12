@@ -7,7 +7,7 @@ import { InkIcon } from "./InkIcons.jsx";
 import "./DocsAccessCard.css";
 
 // The Profile "Docs" tile. Owners go straight in; anyone else sees a friendly "not authorised" notice.
-export default function DocsAccessCard({ onOpen, onContact }) {
+export default function DocsAccessCard({ onOpen, onContact, className = "pf-tile docs", onPointerDown }) {
   const [checking, setChecking] = useState(false);
   const [denied, setDenied] = useState(false);
   useBackLayer(denied, () => setDenied(false));
@@ -26,7 +26,7 @@ export default function DocsAccessCard({ onOpen, onContact }) {
 
   return (
     <>
-      <button type="button" className="pf-tile docs" onClick={handleOpen} aria-busy={checking}>
+      <button type="button" className={className} onPointerDown={onPointerDown} onClick={handleOpen} aria-busy={checking}>
         <span className="pf-tile-ic"><InkIcon name="docs" size={21} /></span>
         <span className="pf-tile-text"><b>Docs</b><small>{checking ? "Checking access…" : "How everything is built and run"}</small></span>
         <InkIcon name="chevron" size={19} className="pf-tile-go" />
