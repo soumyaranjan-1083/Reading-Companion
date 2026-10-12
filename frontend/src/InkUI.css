@@ -81,7 +81,7 @@
 .ink-switch-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 14px; font-weight: 650; }
 .ink-switch-copy small { color: var(--ink-muted); font-size: 12px; font-weight: 450; line-height: 1.4; }
 .ink-switch-track { position: relative; display: block; width: 52px; height: 30px; flex: 0 0 52px; padding: 3px; border: 1px solid var(--ink-line); border-radius: 20px; background: color-mix(in srgb, var(--ink-muted) 17%, var(--ink-surface)); }
-.ink-switch-track i { display: block; width: 22px; height: 22px; border-radius: 50%; background: var(--ink-muted); transition: transform 180ms ease, background 180ms ease; }
+.ink-switch-track i { display: block; width: 22px; height: 22px; border-radius: 50%; background: var(--ink-muted); transition: transform 180ms ease; }
 .ink-switch.is-on .ink-switch-track { border-color: color-mix(in srgb, var(--ink-aqua) 65%, var(--ink-line)); background: color-mix(in srgb, var(--ink-aqua) 22%, var(--ink-surface)); }
 .ink-switch.is-on .ink-switch-track i { transform: translateX(22px); background: var(--ink-aqua); }
 .ink-switch:disabled { opacity: .56; cursor: wait; }
@@ -90,7 +90,7 @@
 .ink-goal-arc svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .ink-goal-track, .ink-goal-value { fill: none; stroke-width: 8; stroke-linecap: round; }
 .ink-goal-track { stroke: var(--ink-line); }
-.ink-goal-value { stroke: var(--ink-aqua); transition: stroke-dashoffset 220ms ease; }
+.ink-goal-value { stroke: var(--ink-aqua); }
 .ink-goal-arc > div { position: absolute; inset: auto 0 5px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .ink-goal-arc b { color: var(--ink-text); font: 600 30px/1 "Playfair Display", serif; }
 .ink-goal-arc small { color: var(--ink-muted); font-size: 12px; }

@@ -43,7 +43,7 @@
   --session-dock-border: rgba(217,119,6,0.25);
 }
 
-body { background: linear-gradient(160deg, var(--bg-1), var(--bg-2) 55%, var(--bg-3)); color: var(--text); font-family: 'Manrope', system-ui, sans-serif; overflow-x: hidden; transition: background 0.3s ease, color 0.3s ease; min-height: 100vh; min-height: 100dvh; }
+body { background: linear-gradient(160deg, var(--bg-1), var(--bg-2) 55%, var(--bg-3)); color: var(--text); font-family: 'Manrope', system-ui, sans-serif; overflow-x: hidden; min-height: 100vh; min-height: 100dvh; }
 h1, h2, .book-tile-title, .continue-title, .gem-quote, .chapter-detail-title { font-family: 'Fraunces', serif; }
 
 .app-shell { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }

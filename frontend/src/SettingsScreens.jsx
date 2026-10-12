@@ -21,7 +21,6 @@ import MajorReleaseCard from "./MajorRelease.jsx";
 import CatalogCard from "./CatalogCard.jsx";
 import ReaderArenaReleaseCard from "./ReaderArenaReleaseCard.jsx";
 import SteadyPagesReleaseCard from "./SteadyPagesReleaseCard.jsx";
-import { INTERACTION_SPRING } from "./motionConfig.js";
 import { useGeminiVoiceDriver } from "./onboarding/avatarDriver.js";
 import { applyPushPrefs, collectSessionStarts, currentPushEndpoint, computeStudyPattern, formatClockMinute, loadPushPrefs, notificationPermission, pushErrorMessage } from "./pushNotifications.js";
 import { getReleaseHistory, normalizeReportStatus } from "./reportIssueHelpers.js";
@@ -33,7 +32,7 @@ import { fetchArenaPhotoPreference, setArenaPhotoVisibility } from "./readingQuo
 import { supabaseClient } from "./supabaseClient.js";
 import { reportsForOwner } from "./reportOwnership.js";
 import ThemedPicker from "./ThemedPicker.jsx";
-import { InkConfirmationSheet, InkGoalDial, InkHoldConfirmButton, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
+import { InkConfirmationSheet, InkGoalDial, InkIcon, InkMotionControl, InkShelfMeter, InkSwitch } from "./InkPrimitives.jsx";
 import { getHomePreviewSnapshot, loadInkMotion, saveHomePreview, saveInkMotion, subscribeHomePreview } from "./inkMotion.js";
 import "./InkSettings.css";
 
@@ -177,8 +176,21 @@ function PfHead({ title, sub, onBack, compact = false }) {
 }
 function SetSec({ title, children }) {
   const chapter = { "You & your companion": "I", Appearance: "II", Voice: "III", Notifications: "IV", "Privacy & storage": "V", "Deleted books": "VI", "Reading limit": "VII", Backup: "VIII", App: "IX", "Danger zone": "X" }[title];
+  const sectionRef = useRef(null);
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || !title || typeof IntersectionObserver === "undefined") return undefined;
+    const root = section.closest(".set-screen");
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      section.classList.add("is-revealed");
+      observer.disconnect();
+    }, { root, threshold: 0.04 });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [title]);
   return (
-    <Motion.section className="set-sec ink-setting-chapter" initial={false}>
+    <Motion.section ref={sectionRef} className="set-sec ink-setting-chapter" initial={false}>
       {title && <h2>{chapter && <span>{chapter}</span>}{title}<i /></h2>}
       {children}
     </Motion.section>
@@ -275,8 +287,6 @@ export function AccountScreen({ nav }) {
 // ======================= SETTINGS =======================
 export function SettingsScreen({ nav, stores }) {
   const { profile, library, memory, gems } = stores;
-  const _inkHoldConfirmButton = InkHoldConfirmButton;
-  void _inkHoldConfirmButton;
   const [, bump] = useState(0);
   const [msg, setMsg] = useState("");
   const [titleCompact, setTitleCompact] = useState(false);
@@ -301,6 +311,7 @@ export function SettingsScreen({ nav, stores }) {
   const { triggerLightTap } = useHaptic();
   const drv = useGeminiVoiceDriver({ voiceName: voice });
   const fileRef = useRef(null);
+  const settingsScreenRef = useRef(null);
 
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 2800); };
   function refreshDeletedBooks() {
@@ -358,15 +369,25 @@ export function SettingsScreen({ nav, stores }) {
   const save = (k, v) => { profile.data[k] = v; profile._save(); bump((n) => n + 1); };
   const kb = Math.round(Object.keys(localStorage).reduce((s, k) => s + k.length + (localStorage.getItem(k) || "").length, 0) * 2 / 1024);
 
-  function setTheme(next) {
+  function setTheme(next, event) {
     triggerLightTap();
     const apply = () => {
       setThemeState(next);
       profile.setTheme(next);
       document.documentElement.setAttribute("data-theme", next);
     };
-    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(apply);
-    else apply();
+    if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const bounds = event?.currentTarget?.getBoundingClientRect();
+      if (bounds) {
+        document.documentElement.style.setProperty("--theme-origin-x", `${bounds.left + bounds.width / 2}px`);
+        document.documentElement.style.setProperty("--theme-origin-y", `${bounds.top + bounds.height / 2}px`);
+      }
+      document.startViewTransition(apply);
+    } else if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.classList.add("theme-switch-fallback");
+      apply();
+      window.setTimeout(() => document.documentElement.classList.remove("theme-switch-fallback"), 240);
+    } else apply();
   }
   function updateMotion(next) {
     setMotionState(saveInkMotion(next));
@@ -495,12 +516,6 @@ export function SettingsScreen({ nav, stores }) {
   useEffect(() => {
     document.documentElement.dataset.motion = motion;
   }, [motion]);
-  useEffect(() => {
-    const update = () => setTitleCompact(window.scrollY > 42);
-    window.addEventListener("scroll", update, { passive: true });
-    update();
-    return () => window.removeEventListener("scroll", update);
-  }, []);
   useBackLayer(Boolean(pendingConfirmation), () => setPendingConfirmation(null));
 
   if (updateDetailsOpen) {
@@ -555,7 +570,7 @@ export function SettingsScreen({ nav, stores }) {
 
 
   return (
-    <div className="screen set-screen ink-scope">
+    <div ref={settingsScreenRef} className="screen set-screen ink-scope" onScroll={(event) => setTitleCompact(event.currentTarget.scrollTop > 42)}>
       <div className="aurora-bg" />
       <PfHead title="Settings" sub={`Version ${APP_VERSION}`} onBack={nav.goBack} compact={titleCompact} />
 
@@ -571,23 +586,18 @@ export function SettingsScreen({ nav, stores }) {
             </label>
             <div className="set-field">
               <div className="set-label"><InkIcon name="goal" size={17} /> Daily reading goal</div>
-              <InkGoalDial value={profile.data.dailyGoal || "20 min"} options={GOALS} onChange={(goal) => { triggerLightTap(); save("dailyGoal", goal); }} />
+              <InkGoalDial value={profile.data.dailyGoal || "20 min"} options={GOALS} onChange={(goal) => save("dailyGoal", goal)} />
             </div>
           </div>
         </SetSec>
 
         <SetSec title="Appearance">
           <div className="set-card">
-            <div className="set-themes" role="group" aria-label="Theme">
-              <Motion.button type="button" whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} className={`set-theme ${theme === "light" ? "on" : ""}`} onClick={() => setTheme("light")}>
-                <span className="set-theme-art light"><i /><i /><b /></span>
-                <span><InkIcon name="sun" size={17} /> Light</span>
-              </Motion.button>
-              <Motion.button type="button" whileTap={{ scale: 0.97 }} transition={INTERACTION_SPRING} className={`set-theme ${theme === "dark" ? "on" : ""}`} onClick={() => setTheme("dark")}>
-                <span className="set-theme-art dark"><i /><i /><b /></span>
-                <span><InkIcon name="moon" size={17} /> Dark</span>
-              </Motion.button>
-            </div>
+            <button type="button" className="ink-theme-switch" role="switch" aria-label="Theme" aria-checked={theme === "light"} onClick={(event) => setTheme(theme === "light" ? "dark" : "light", event)}>
+              <span className="ink-theme-switch-icons"><InkIcon name="sun" size={19} /><InkIcon name="moon" size={18} /></span>
+              <span className="ink-theme-switch-value">{theme === "light" ? "Light" : "Dark"}</span>
+              <span className={`ink-theme-switch-track ${theme === "light" ? "light" : "dark"}`} aria-hidden="true"><i /></span>
+            </button>
             <div className="ink-setting-line"><span><b>Motion</b><small>Calm avoids ambient motion; Rich includes brief entry effects.</small></span><InkMotionControl value={motion} onChange={updateMotion} /></div>
             <InkSwitch checked={homePreview} onChange={updateHomePreview} label="New Home (preview)" hint="Try the alternate desk layout. Your existing Home remains available by switching this off." />
           </div>
